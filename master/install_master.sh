@@ -60,7 +60,7 @@ fi
 echo -e "======================================\n"
 sleep 1
 
-REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL="https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 UV_PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 UV_BIN="/usr/local/bin/uv"
 
@@ -470,5 +470,5 @@ fi
 echo -e "\n========================================================"
 echo -e "⭐ \033[33m如果本项目对您有帮助，欢迎在 GitHub 点 Star。\033[0m"
 echo -e "💡 \033[32m您的每一颗 Star 都是我们持续迭代架构、开发 Web 视窗化控制台的动力源泉。\033[0m"
-echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/hotyue/IP-Sentinel\033\\点击此处直达 GitHub 仓库点亮 Star 🌟\033[0m\033]8;;\033\\"
+echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/lasitan/IP-Sentinel\033\\点击此处直达 GitHub 仓库点亮 Star 🌟\033[0m\033]8;;\033\\"
 echo -e "========================================================\n"

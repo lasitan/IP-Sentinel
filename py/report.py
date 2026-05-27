@@ -18,7 +18,7 @@ from pathlib import Path
 from config import load_config
 from network import build_curl_context
 
-REPO_RAW_URL = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 
 FLAGS = {
     "US": "🇺🇸", "JP": "🇯🇵", "HK": "🇭🇰", "TW": "🇹🇼", "SG": "🇸🇬",

@@ -2,7 +2,7 @@
 
 ![Agent Installs](https://img.shields.io/endpoint?url=https://ip-sentinel-count.samanthaestime296.workers.dev/stats/agent)
 ![Master Commands](https://img.shields.io/endpoint?url=https://ip-sentinel-count.samanthaestime296.workers.dev/stats/master)
-![License](https://img.shields.io/github/license/hotyue/IP-Sentinel)
+![License](https://img.shields.io/github/license/lasitan/IP-Sentinel)
 
 轻量级 **Master–Agent** 分布式工具：在 VPS 上定时执行 Google 地理纠偏、站点访问与 IP 质量检测，并通过 Telegram 集中管理多节点。
 
@@ -62,14 +62,14 @@ make lint
    [部署说明](https://blog.iot-architect.com/engineering-practice/ip-sentinel-master-deployment-guide/)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/master/install_master.sh -o /tmp/ins_master.sh && sudo bash /tmp/ins_master.sh
+curl -fsSL https://raw.githubusercontent.com/lasitan/IP-Sentinel/main/master/install_master.sh -o /tmp/ins_master.sh && sudo bash /tmp/ins_master.sh
 ```
 
 2. **安装 Agent**（各维护节点）  
    选择私有 Master，填写自建 Bot [Token](https://blog.iot-architect.com/engineering-practice/create-private-telegram-bot-via-botfather) 与 [Chat ID](https://blog.iot-architect.com/engineering-practice/get-telegram-personal-id-via-userinfobot)。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/core/install.sh -o /tmp/ins_agent.sh && sudo bash /tmp/ins_agent.sh
+curl -fsSL https://raw.githubusercontent.com/lasitan/IP-Sentinel/main/core/install.sh -o /tmp/ins_agent.sh && sudo bash /tmp/ins_agent.sh
 ```
 
 3. 将安装后收到的 `#REGISTER#...` 消息发给您的 Bot 完成注册。
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/core/instal
    [说明](https://blog.iot-architect.com/engineering-practice/deploy-ip-sentinel-official-gateway/)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hotyue/IP-Sentinel/main/core/install.sh -o /tmp/ins_agent.sh && sudo bash /tmp/ins_agent.sh
+curl -fsSL https://raw.githubusercontent.com/lasitan/IP-Sentinel/main/core/install.sh -o /tmp/ins_agent.sh && sudo bash /tmp/ins_agent.sh
 ```
 
 3. 将注册消息转发给官方 Bot。
@@ -109,7 +109,7 @@ bash /opt/ip_sentinel/core/uninstall.sh
 ## Legacy（Debian 9）
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/hotyue/IP-Sentinel/legacy/core/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/lasitan/IP-Sentinel/legacy/core/install.sh)
 ```
 
 旧系统分支仅做基础维护，建议使用较新发行版。
@@ -132,4 +132,4 @@ IP 质量检测脚本感谢 [xykt/IPQuality](https://github.com/xykt/IPQuality)�
 
 [![Blog](https://img.shields.io/badge/Blog-个人博客-blue)](https://blog.iot-architect.com)
 
-[![Stargazers over time](https://starchart.cc/hotyue/IP-Sentinel.svg?variant=adaptive)](https://starchart.cc/hotyue/IP-Sentinel)
+[![Stargazers over time](https://starchart.cc/lasitan/IP-Sentinel.svg?variant=adaptive)](https://starchart.cc/lasitan/IP-Sentinel)

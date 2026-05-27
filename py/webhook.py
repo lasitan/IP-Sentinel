@@ -324,7 +324,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
 
             self._ok(b"Action Accepted: trigger_ota\n")
 
-            repo_url = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+            repo_url = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
             install_sh = f"{INSTALL_DIR}/core/install.sh"
             if os.path.isfile(install_sh):
                 with open(install_sh, encoding="utf-8", errors="ignore") as f:

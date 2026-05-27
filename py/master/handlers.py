@@ -30,7 +30,7 @@ from master.security import (
 )
 from master.telegram_api import TelegramAPI
 
-REPO_RAW_URL = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 
 
 class MasterHandlers:
@@ -370,7 +370,7 @@ class MasterHandlers:
         kb = btn_ota + [
             [{"text": "🌍 管理节点", "callback_data": "list_nodes"}],
             row2,
-            [{"text": "🌟 前往 GitHub 点亮星标", "url": "https://github.com/hotyue/IP-Sentinel"}],
+            [{"text": "🌟 前往 GitHub 点亮星标", "url": "https://github.com/lasitan/IP-Sentinel"}],
         ]
         msg = (
             f"🛡️ **IP-Sentinel Master**\n{ver}\n\n"

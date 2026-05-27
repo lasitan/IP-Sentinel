@@ -12,7 +12,7 @@ from config import require_config
 from log_util import log
 from network import build_curl_context
 
-REPO_RAW_URL = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 UA_COOLDOWN_SEC = 2592000  # 30 天
 LOG_KEEP_LINES = 2000
 

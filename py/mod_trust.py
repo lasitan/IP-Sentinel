@@ -16,7 +16,7 @@ from log_util import log_trust
 from network import build_curl_context, http_status
 from persona import load_lines, pick_session_ua
 
-REPO_RAW_URL = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 FALLBACK_URLS = [
     "https://en.wikipedia.org/wiki/Special:Random",
     "https://www.apple.com/",
