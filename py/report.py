@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram 战报：日志统计、节点快照、版本探针."""
+"""Telegram 日报：日志统计、节点状态、版本检查."""
 
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def run() -> int:
                     with open(log_path, "a", encoding="utf-8") as f:
                         f.write(
                             f"[{ts}] [v{ver}] [WARN ] [Report ] [SYSTEM] "
-                            "⚠️ 战报请求过于频繁，触发 60 秒防并发风暴拦截。\n"
+                            "⚠️ 报告请求过于频繁，请 60 秒后再试。\n"
                         )
                 return 0
         except ValueError:
@@ -179,7 +179,7 @@ def run() -> int:
             "----------------------------\n"
             f"📍 **节点名称**: `{node_alias}`\n"
             "⚠️ **警告**: 过去 24 小时无运行日志！\n"
-            "🛠️ **建议**: 节点可能刚部署完毕，请在面板手动执行一次养护动作。"
+            "🛠️ **建议**: 节点可能刚安装，请在面板手动执行一次维护任务。"
         )
     else:
         score_lines = [ln for ln in log_content.splitlines() if "[SCORE]" in ln]
@@ -215,7 +215,7 @@ def run() -> int:
             msg += (
                 f"\n\n🎯 **[Google 区域纠偏]**\n"
                 f"🚀 执行总数: {g_total} 次 (胜率: **{rate}%**)\n"
-                f"✅ 成功: {g_ok} | ❌ 送中: {g_fail} | ⚠️ 警告: {g_warn}"
+                f"✅ 成功: {g_ok} | ❌ CN 判定: {g_fail} | ⚠️ 警告: {g_warn}"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":
@@ -240,25 +240,25 @@ def run() -> int:
     report_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     remote_ver = _remote_agent_version()
 
-    msg += f"\n----------------------------\n🛡️ **系统引擎状态**\n⏱️ 战报生成: `{report_utc}`"
+    msg += f"\n----------------------------\n🛡️ **系统状态**\n⏱️ 报告时间: `{report_utc}`"
     if remote_ver:
         if remote_ver != local_ver:
             msg += (
                 f"\n当前运行版本: `v{local_ver}`\n"
                 f"✨ **发现新版本**: `v{remote_ver}` (建议更新)\n"
-                "💡 *系统提示：检测到新版引擎，建议通过中枢控制台执行 OTA 热更新！*"
+                "💡 *检测到新版本，建议在 Master 面板执行 OTA 升级。*"
             )
         else:
             msg += (
                 f"\n当前运行版本: `v{local_ver}` (✅已是最新)\n"
                 "💡 *IP-Sentinel 持续为您守护节点。*\n"
-                "*若本项目对您有帮助，欢迎前往 GitHub 赐予 🌟*"
+                "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
             )
     else:
         msg += (
             f"\n当前运行版本: `v{local_ver}`\n"
             "💡 *IP-Sentinel 持续为您守护节点。*\n"
-            "*若本项目对您有帮助，欢迎前往 GitHub 赐予 🌟*"
+            "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
         )
 
     payload = {
@@ -274,11 +274,11 @@ def run() -> int:
     ok = _send_telegram(cfg.get("TG_API_URL", ""), payload)
     err_log = Path(install) / "logs" / "error.log"
     if ok:
-        print("✅ 战报推送成功！")
+        print("✅ 报告已发送。")
     else:
         err_log.parent.mkdir(parents=True, exist_ok=True)
         with open(err_log, "a", encoding="utf-8") as f:
-            f.write("❌ 战报发送失败！\n")
+            f.write("❌ 报告发送失败。\n")
     return 0 if ok else 1
 
 

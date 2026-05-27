@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""深海声呐：IP 质量探针 (委托 xykt/ip_probe 脚本 + JSON 解析)."""
+"""IP 质量检测 (基于 xykt/ip_probe 脚本与 JSON 解析)."""
 
 from __future__ import annotations
 
@@ -135,9 +135,9 @@ def run() -> int:
                 "chat_id": cfg["CHAT_ID"],
                 "parse_mode": "Markdown",
                 "text": (
-                    "❌ *深海声呐探测失败*\n"
+                    "❌ *IP 质量检测失败*\n"
                     f"📍 节点：`{cfg.get('NODE_ALIAS', '未知')}`\n"
-                    "⚠️ *探针脚本拉取失败。*"
+                    "⚠️ 探针脚本下载失败。"
                 ),
             },
         )
@@ -154,10 +154,10 @@ def run() -> int:
                 "chat_id": cfg["CHAT_ID"],
                 "parse_mode": "Markdown",
                 "text": (
-                    "❌ *深海声呐探测失败*\n"
+                    "❌ *IP 质量检测失败*\n"
                     f"📍 节点：`{node_alias}`\n"
-                    f"🌐 锁定IP：`{cfg.get('PUBLIC_IP', '')}`\n"
-                    "⚠️ *未收到有效回波。检测源超时或数据解析受阻。*"
+                    f"🌐 IP：`{cfg.get('PUBLIC_IP', '')}`\n"
+                    "⚠️ 未收到有效结果（超时或解析失败）。"
                 ),
             },
         )
@@ -205,7 +205,7 @@ def run() -> int:
 
     warning = ""
     if raw_yt_reg == "CN" or "中国" in (raw_yt_stat or ""):
-        warning = "\n🚨 **[高危] 该节点已被 Google 判定为中国大陆 (送中)！**\n"
+        warning = "\n🚨 **Google 地理判定为中国大陆。**\n"
 
     port25 = data.get("Mail", {}).get("Port25") is True
     p25 = "✅ 畅通" if port25 else "❌ 封堵"
@@ -217,7 +217,7 @@ def run() -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     link_ip = (cfg.get("PUBLIC_IP") or "").strip("[]")
 
-    report = f"""🎯 *IP-Sentinel 深海声呐报告*
+    report = f"""🎯 *IP-Sentinel IP 质量报告*
 📍 节点：`{node_alias}`
 🌐 地址：`{ip_addr}`{warning}
 
@@ -227,7 +227,7 @@ def run() -> int:
 **属性:** `{ip_type}` | `{usage}`
 **探针:** {is_proxy}
 
-*🛡️ 欺诈雷达 (0为最优)*
+*🛡️ 风险评分 (越低越好)*
 • **Scamalytics:** `{scam}/100`
 • **AbuseIPDB:** `{abuse}/100`
 • **IPQS:** `{ipqs}/100`

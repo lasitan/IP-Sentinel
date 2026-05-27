@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""热数据 OTA：UA 池、关键词、战区 JSON、探针脚本与日志瘦身."""
+"""数据 OTA：UA 库、关键词、区域 JSON、探针脚本与日志清理."""
 
 from __future__ import annotations
 
@@ -79,10 +79,10 @@ def run() -> int:
         tmp_json = Path("/tmp/ip_sentinel_region.json")
         if _curl_download(ctx, f"{REPO_RAW_URL}/{rel}", tmp_json):
             tmp_json.replace(region_json)
-            _log("INFO ", f"✅ 核心战区规则库 ({rel}) 每日同步成功")
+            _log("INFO ", f"✅ 区域规则 ({rel}) 同步成功")
         else:
             tmp_json.unlink(missing_ok=True)
-            _log("WARN ", "❌ 战区规则库拉取失败，保留本地旧数据")
+            _log("WARN ", "❌ 区域规则下载失败，保留本地旧数据")
 
     tmp_probe = Path("/tmp/ip_sentinel_probe.sh")
     if _curl_download(ctx, "https://raw.githubusercontent.com/xykt/IPQuality/main/ip.sh", tmp_probe):
@@ -91,10 +91,10 @@ def run() -> int:
             dest = core / "ip_probe.sh"
             tmp_probe.replace(dest)
             dest.chmod(0o755)
-            _log("INFO ", "✅ 深海声呐底层探针 (ip_probe.sh) 源文件安全对齐")
+            _log("INFO ", "✅ ip_probe.sh 已更新")
         else:
             tmp_probe.unlink(missing_ok=True)
-            _log("WARN ", "❌ 探针源文件拉取受损或遭投毒劫持，已触发防砖机制，保留本地旧版本")
+            _log("WARN ", "❌ ip_probe.sh 下载失败，保留本地旧版本")
     else:
         tmp_probe.unlink(missing_ok=True)
         _log("WARN ", "❌ 探针源文件拉取失败，保留本地旧版本")

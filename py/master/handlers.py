@@ -357,7 +357,7 @@ class MasterHandlers:
             if remote != self.version:
                 ver += f"\n✨ **发现新版本**: `{remote}` (可升级 Master)"
                 if not self.official and self.master_ota:
-                    btn_ota = [[{"text": f"🆙 升级控制中枢至 v{remote}", "callback_data": "master_ota_confirm"}]]
+                    btn_ota = [[{"text": f"🆙 升级 Master 至 v{remote}", "callback_data": "master_ota_confirm"}]]
             else:
                 ver = f"当前版本: `{self.version}` (✅已是最新)"
         count = self.db.scalar("SELECT COUNT(*) FROM nodes WHERE chat_id=?", (chat_id,)) or 0

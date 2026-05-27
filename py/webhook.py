@@ -335,7 +335,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
 
             alias = cfg.get("NODE_ALIAS", "未知")
             err_msg = (
-                f"❌ **OTA 熔断告警**\n📍 节点: `{alias}`\n"
+                f"❌ **OTA 失败**\n📍 节点: `{alias}`\n"
                 "⚠️ 原因: 脚本语法校验(bash -n)未通过，下载可能不完整。\n"
                 "🚀 状态: 升级已取消，节点安全。"
             )

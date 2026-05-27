@@ -102,15 +102,15 @@ def score_geo_status(
     probes = [jump_gl, yt_pr_gl, yt_mu_gl]
     valid = [p for p in probes if p]
     if not valid:
-        return "🚨 探针失效 (三核全部熔断，可能遭严重风控拦截)"
+        return "🚨 探针无有效响应（可能被风控拦截）"
     if "CN" in valid:
-        return "❌ 严重高危！三核雷达判定 IP 已被中国大陆锁定 (送中)！"
+        return "❌ 严重：多个探针判定 IP 位于中国大陆"
 
     yt_match = yt_pr_gl == target_cc or yt_mu_gl == target_cc
     if yt_match:
         if jump_gl and jump_gl != target_cc:
             return (
-                f"✅ 目标区域达成 (YT主导成功, Jump副雷达漂移至 {jump_gl}) | "
+                f"✅ 目标区域匹配 (YouTube 主探针成功, Jump 探针为 {jump_gl}) | "
                 f"Prem: {yt_pr_gl or '无'} | Music: {yt_mu_gl or '无'}"
             )
         return (

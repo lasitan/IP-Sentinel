@@ -64,7 +64,7 @@ def run() -> int:
         log(cfg, "SYSTEM", "INFO", "休眠结束，开始计算本轮任务轮盘...")
         picked = _pick_module(cfg)
         if not picked:
-            log(cfg, "SYSTEM", "WARN", "节点未开启任何养护模块，跳过本轮执行。")
+            log(cfg, "SYSTEM", "WARN", "未启用任何维护模块，跳过本轮。")
             return 0
 
         script_name, mod_name = picked
@@ -80,7 +80,7 @@ def run() -> int:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        log(cfg, "SYSTEM", "INFO", "本轮所有模块调度完毕，哨兵继续隐蔽待命。")
+        log(cfg, "SYSTEM", "INFO", "本轮模块调度完成。")
         return 0
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Master 司令部入口 (由 install_master.sh 部署的 systemd/cron 调用)."""
+"""Master 入口 (由 install_master.sh 配置的 systemd/cron 调用)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""战区 ISO 代码 → 旗帜 emoji."""
+"""区域 ISO 代码 → 旗帜 emoji."""
 
 from __future__ import annotations
 

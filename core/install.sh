@@ -185,7 +185,7 @@ ensure_uv
 echo -e "\033[32m✅ 基础环境检测通过。\033[0m"
 
 # ----------------------------------------------------------
-# [交互中枢] LBS 地理图谱树预载
+# 下载区域地图并引导配置
 # ----------------------------------------------------------
 echo -e "\n[2/7] 正在下载区域地图 (map.json)..."
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/map.json" -o "${SECURE_TMP}/map.json"
@@ -196,7 +196,7 @@ fi
 
 # OTA 模式：跳过交互菜单
 if [ "$SILENT_OTA" == "true" ]; then
-    echo -e "\n⏳ [OTA] 开始静默升级..."
+    echo -e "\n⏳ [OTA] 开始自动升级..."
     ACTION_CHOICE=1
     UPGRADE_MODE="true"
     KEEP_LOGS="true"

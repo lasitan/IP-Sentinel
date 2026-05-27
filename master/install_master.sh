@@ -109,14 +109,14 @@ MASTER_DIR="/opt/ip_sentinel_master"
 DB_FILE="${MASTER_DIR}/sentinel.db"
 
 echo "========================================================"
-echo "      🧠 欢迎使用 IP-Sentinel Master (控制中枢) v${TARGET_VERSION}"
+echo "      IP-Sentinel Master v${TARGET_VERSION}"
 echo "========================================================"
 
 # ==========================================================
 # [指令接管] 云端 OTA 重构流引擎拦截
 # ==========================================================
 if [ "$SILENT_MASTER_OTA" == "true" ]; then
-    echo -e "\n⏳ [OTA] 中枢重构指令已确认，正在剥离控制台交互..."
+    echo -e "\n⏳ [OTA] 开始自动升级..."
     ACTION_CHOICE=1
     UPGRADE_MODE="true"
     KEEP_DB="true"
@@ -130,11 +130,11 @@ if [ "$SILENT_MASTER_OTA" == "true" ]; then
             echo "MASTER_VERSION=\"$TARGET_VERSION\"" >> "${MASTER_DIR}/master.conf"
         fi
     fi
-    echo -e "\033[32m✅ 已激活 [中枢静默重构模式]，即将无损覆写内核...\033[0m"
+    echo -e "\033[32m✅ OTA 模式：将保留配置并更新程序。\033[0m"
 else
     echo -e "\n请选择操作:"
-    echo "  1) 🚀 部署 Master 控制中枢"
-    echo "  2) 🗑️ 一键卸载 Master 中枢"
+    echo "  1) 安装 Master"
+    echo "  2) 卸载 Master"
     read -p "请输入选择 [1-2] (默认1): " ACTION_CHOICE
 
     ACTION_CHOICE=${ACTION_CHOICE:-1}
@@ -148,13 +148,13 @@ else
         exit 0
     fi
 
-    # [态势传承] 平滑接管探查并保护库文件
+    # 已安装时询问是否保留配置升级
     UPGRADE_MODE="false"
     KEEP_DB="true"
 
     if [ "$ACTION_CHOICE" == "1" ] && [ -f "${MASTER_DIR}/master.conf" ]; then
         echo -e "\n\033[33m💡 检测到本机已安装 Master。\033[0m"
-        read -p "👉 是否按原配置直接进行平滑升级？(y/n, 默认y): " UPGRADE_CHOICE
+        read -p "是否保留现有配置并升级？(y/n, 默认 y): " UPGRADE_CHOICE
         if [[ -z "$UPGRADE_CHOICE" || "$UPGRADE_CHOICE" =~ ^[Yy]$ ]]; then
             UPGRADE_MODE="true"
             read -p "👉 是否保留历史节点数据库 (SQLite)？(y/n, 默认y): " DB_CHOICE
@@ -170,9 +170,9 @@ else
                 echo "MASTER_VERSION=\"$TARGET_VERSION\"" >> "${MASTER_DIR}/master.conf"
             fi
             
-            echo -e "\033[32m✅ 已激活 [平滑升级模式]，版本已锚定为 v${TARGET_VERSION}...\033[0m"
+            echo -e "\033[32m✅ 升级模式，目标版本 v${TARGET_VERSION}。\033[0m"
         else
-            echo -e "\033[33m🔄 您选择了重新配置，旧的中枢数据将被彻底抹除。\033[0m"
+            echo -e "\033[33m🔄 将重新配置，现有 Master 数据会被清除。\033[0m"
         fi
     fi
 fi
@@ -267,12 +267,12 @@ mkdir -p "$MASTER_DIR"
 # [配置总线] 构建交互与策略文件固化
 # ==========================================================
 if [ "$UPGRADE_MODE" == "false" ]; then
-    echo -e "\n[2/4] 配置控制中枢机器人:"
+    echo -e "\n[2/4] 配置 Telegram Bot:"
     read -p "请输入 Telegram Bot Token: " TG_TOKEN
     
     echo -e "\n请选择您的部署环境身份:"
-    echo "  1) 🛡️ 私有独立中枢 (默认推荐，保留完整 OTA 遥控权限)"
-    echo "  2) ☁️ 官方公共网关 (面向大众服务，将强制物理隐藏全局 OTA 按钮防滥用)"
+    echo "  1) 私有 Master (默认，支持 OTA)"
+    echo "  2) 官方公共网关 (隐藏全局 OTA，防滥用)"
     read -p "请输入选择 [1-2] (默认1): " GATEWAY_TYPE
     GATEWAY_TYPE=${GATEWAY_TYPE:-1}
     
@@ -280,17 +280,17 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     ENABLE_MASTER_OTA="false"
     if [ "$GATEWAY_TYPE" == "2" ]; then
         IS_OFFICIAL_GATEWAY="true"
-        echo -e "\033[33m⚠️ 已开启官方公共网关模式，全舰队与司令部的 OTA 将被强制屏蔽。\033[0m"
+        echo -e "\033[33m⚠️ 官方公共网关模式下，Master 与节点的 OTA 已禁用。\033[0m"
     else
-        echo -e "\n[2.1/4] 司令部自我进化授权"
-        echo -e "💡 开启后，您可以在 TG 菜单一键将中枢核心系统热更新至最新版本。"
-        read -p "是否允许司令部接收 OTA 重构指令？(y/n, 默认y): " M_OTA_CHOICE
+        echo -e "\n[2.1/4] Master OTA 远程升级"
+        echo -e "💡 开启后，可在 Telegram 菜单中升级 Master。"
+        read -p "是否允许 Master 接收 OTA 升级？(y/n, 默认 y): " M_OTA_CHOICE
         if [[ "$M_OTA_CHOICE" =~ ^[Nn]$ ]]; then
             ENABLE_MASTER_OTA="false"
-            echo -e "🛡️ \033[33m已关闭司令部 OTA 权限，中枢内核未来仅支持 SSH 升级。\033[0m"
+            echo -e "🛡️ \033[33m已关闭 Master OTA，仅支持 SSH 手动升级。\033[0m"
         else
             ENABLE_MASTER_OTA="true"
-            echo -e "✅ \033[32m已开启司令部 OTA 权限，金蝉脱壳引信已挂载。\033[0m"
+            echo -e "✅ \033[32m已开启 Master OTA。\033[0m"
         fi
     fi
 
@@ -367,13 +367,13 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/.python-version" -o "
 
 if [ ! -s "${TMP_PY}/run_master.py" ] || [ ! -s "${TMP_PY}/master/bot.py" ] || \
    [ ! -s "${SECURE_TMP}/pyproject.toml" ] || [ ! -s "${SECURE_TMP}/uv.lock" ]; then
-    echo -e "\033[31m❌ 致命错误：中枢核心代码拉取失败！网络阻断或 GitHub Raw 异常。\033[0m"
+    echo -e "\033[31m❌ 下载失败：核心文件缺失，请检查网络或 GitHub Raw。\033[0m"
     echo "已中止更新，现有 Master 未被覆盖。"
     rm -rf "$TMP_PY" "${SECURE_TMP}/pyproject.toml" "${SECURE_TMP}/uv.lock" "${SECURE_TMP}/.python-version"
     exit 1
 fi
 
-echo "⏳ 新引擎校验通过，正在抹杀旧版守护进程..."
+echo "⏳ 校验通过，正在停止旧进程..."
 if is_systemd; then
     systemctl kill --signal=SIGKILL ip-sentinel-master.service >/dev/null 2>&1 || true
     systemctl stop ip-sentinel-master.service >/dev/null 2>&1 || true
@@ -438,22 +438,21 @@ fi
 # ==========================================================
 echo "========================================================"
 if [ "$UPGRADE_MODE" == "true" ]; then
-    echo "🎉 Master 控制中枢平滑热更新完成！"
-    echo "🤖 新版中枢引擎已接管数据库，继续等待边缘节点汇报。"
+    echo "🎉 Master 升级完成。"
+    echo "服务已重启，可继续管理 Agent 节点。"
     
-    # 幽灵态静默 OTA 完毕后执行回叫汇报
     if [ "$SILENT_MASTER_OTA" == "true" ] && [ -n "$OTA_CHAT_ID" ] && [ -n "$TG_TOKEN" ]; then
-        echo -e "\n📡 正在向指挥官发送司令部重构捷报..."
+        echo -e "\n📡 正在发送 OTA 完成通知…"
         curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             -d "chat_id=${OTA_CHAT_ID}" \
             -d "parse_mode=Markdown" \
-            -d "text=✨ *司令部中枢热重载完成！*
-🚀 当前内核已跃升至：\`v${TARGET_VERSION}\`
-🤖 新版金蝉脱壳引擎已接管阵地，全舰队指控链路恢复正常。" > /dev/null
+            -d "text=✨ *Master 升级完成*
+🚀 当前版本：\`v${TARGET_VERSION}\`
+服务已重新启动。" > /dev/null
     fi
 else
-    echo "🎉 Master 控制中枢部署完成！"
-    echo "🤖 机器人现已开始全局接客，等待边缘节点注册。"
+    echo "🎉 Master 安装完成。"
+    echo "Telegram Bot 已启动，等待 Agent 节点注册。"
 fi
 echo "========================================================"
 
@@ -462,14 +461,14 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     MASTER_COUNT=$(curl -s -m 3 "https://ip-sentinel-count.samanthaestime296.workers.dev/ping/master" || echo "")
 
     if [ -n "$MASTER_COUNT" ] && [[ "$MASTER_COUNT" =~ ^[0-9]+$ ]]; then
-        echo -e "\033[32m✅ 感谢您成为全球第 ${MASTER_COUNT} 名 IP-Sentinel 中枢管理者！\033[0m"
+        echo -e "\033[32m✅ 您是全球第 ${MASTER_COUNT} 位 IP-Sentinel Master 用户。\033[0m"
     else
-        echo -e "\033[32m✅ 感谢您部署 IP-Sentinel 控制中枢！\033[0m"
+        echo -e "\033[32m✅ 感谢部署 IP-Sentinel Master。\033[0m"
     fi
 fi
 
 echo -e "\n========================================================"
-echo -e "⭐ \033[33m开源不易，如果 IP-Sentinel 极大简化了您的多节点管理，请赐予我们一枚星标！\033[0m"
+echo -e "⭐ \033[33m如果本项目对您有帮助，欢迎在 GitHub 点 Star。\033[0m"
 echo -e "💡 \033[32m您的每一颗 Star 都是我们持续迭代架构、开发 Web 视窗化控制台的动力源泉。\033[0m"
 echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/hotyue/IP-Sentinel\033\\点击此处直达 GitHub 仓库点亮 Star 🌟\033[0m\033]8;;\033\\"
 echo -e "========================================================\n"
