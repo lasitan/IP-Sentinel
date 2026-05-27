@@ -290,6 +290,59 @@ def _apply_cdp_geolocation(
         _log("WARN ", f"[{tag}] CDP Geolocation 覆写失败: {exc}")
 
 
+def _goto_follow_redirects(
+    page: Page,
+    url: str,
+    _log: LogFn | None,
+    tag: str,
+    *,
+    timeout: float = 120_000,
+) -> None:
+    """
+    导航并容忍重定向链导致的 ERR_ABORTED（首跳被下一跳取消时仍视为成功）.
+    """
+    last_exc: Exception | None = None
+
+    def _emit(level: str, msg: str) -> None:
+        if _log:
+            _log(level, msg)
+
+    for wait_until in ("commit", "domcontentloaded", "load"):
+        try:
+            resp = page.goto(url, wait_until=wait_until, timeout=timeout)
+            final = page.url or ""
+            if final and not final.startswith("about:"):
+                status = resp.status if resp else "?"
+                _emit(
+                    "INFO ",
+                    f"[{tag}] 导航完成 ({wait_until}) HTTP {status} → {final}",
+                )
+                return
+        except Exception as exc:
+            last_exc = exc
+            err_text = str(exc)
+            current = page.url or ""
+            if "ERR_ABORTED" in err_text and current and not current.startswith("about:"):
+                _emit(
+                    "INFO ",
+                    f"[{tag}] 首跳因重定向中断 (ERR_ABORTED)，已跟随至: {current}",
+                )
+                for state in ("domcontentloaded", "load", "networkidle"):
+                    try:
+                        page.wait_for_load_state(state, timeout=60_000)
+                        _emit("INFO ", f"[{tag}] 重定向后页面就绪 ({state})")
+                        return
+                    except Exception:
+                        continue
+                if "earth.google.com" in current or "google.com" in current:
+                    return
+            if wait_until == "load":
+                break
+
+    if last_exc:
+        raise last_exc
+
+
 def _try_click_text(page: Page, labels: tuple[str, ...], timeout_ms: int = 3000) -> str | None:
     for label in labels:
         try:
@@ -325,7 +378,7 @@ def _earth_enter_explore_and_locate(
     explore = earth_explore_url(latitude, longitude)
     if "/web/@" not in page.url:
         _log("INFO ", f"[EARTH_GEO] 跳转探索地球: {explore}")
-        page.goto(explore, wait_until="domcontentloaded", timeout=120_000)
+        _goto_follow_redirects(page, explore, _log, "EARTH_GEO")
         page.wait_for_timeout(4000)
     else:
         _log("INFO ", "[EARTH_GEO] 已在 Earth Web 探索视图")
@@ -445,7 +498,7 @@ def _visit_with_geolocation(
             page = context.new_page()
             _apply_cdp_geolocation(context, page, latitude, longitude, _log, tag)
 
-            page.goto(seed_url, wait_until="domcontentloaded", timeout=120_000)
+            _goto_follow_redirects(page, seed_url, _log, tag)
             if on_loaded:
                 on_loaded(page)
 
@@ -500,11 +553,13 @@ def visit_google_earth(
             log(level, msg)
 
     def _on_loaded(page: Page) -> None:
-        _earth_log("INFO ", "[EARTH_GEO] 打开 earth.google.com，进入探索界面…")
+        _earth_log("INFO ", "[EARTH_GEO] Earth 探索视图已加载，进入定位流程…")
         _earth_enter_explore_and_locate(page, lat, lon, _earth_log)
 
+    # 先进入 /web/ 探索入口（根域常会 302→/web，易触发 ERR_ABORTED）
+    seed = earth_explore_url(latitude, longitude)
     return _visit_with_geolocation(
-        seed_url="https://earth.google.com/",
+        seed_url=seed,
         latitude=latitude,
         longitude=longitude,
         user_agent=user_agent,
