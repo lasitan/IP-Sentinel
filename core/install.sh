@@ -67,6 +67,88 @@ CONFIG_FILE="${INSTALL_DIR}/config.conf"
 UV_PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 UV_BIN="/usr/local/bin/uv"
 
+# 安装脚本 JSON/Telegram 辅助（标准库，不依赖 jq）
+_ips_pyjson() {
+    python3 - "$@" <<'PY'
+import json
+import sys
+
+
+def _map_list(path: str, level: str, cont: str, country: str, state: str) -> None:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if level == "continents":
+        for item in data.get("continents", []):
+            print(f"{item['id']}|{item['name']}")
+        return
+    for cont_obj in data.get("continents", []):
+        if cont_obj.get("id") != cont:
+            continue
+        if level == "countries":
+            for co in cont_obj.get("countries", []):
+                kf = co.get("keyword_file", "")
+                print(f"{co['id']}|{co['name']}|{kf}")
+            return
+        for co in cont_obj.get("countries", []):
+            if co.get("id") != country:
+                continue
+            if level == "states":
+                for st in co.get("states", []):
+                    print(f"{st['id']}|{st['name']}")
+                return
+            for st in co.get("states", []):
+                if st.get("id") != state:
+                    continue
+                for city in st.get("cities", []):
+                    print(f"{city['id']}|{city['name']}")
+                return
+
+
+def _region_fields(path: str) -> None:
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    gm = doc.get("google_module") or {}
+    for key in (
+        "region_name",
+        "base_lat",
+        "base_lon",
+        "lang_params",
+        "valid_url_suffix",
+    ):
+        if key == "region_name":
+            print(doc.get(key, ""))
+        else:
+            print(gm.get(key, ""))
+
+
+def _tg_payload(cid: str, text_path: str, callback: str) -> None:
+    with open(text_path, encoding="utf-8") as f:
+        text = f.read()
+    body = {
+        "chat_id": cid,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "⚙️ 调出该节点控制台", "callback_data": callback}]
+            ]
+        },
+    }
+    print(json.dumps(body, ensure_ascii=False))
+
+
+cmd = sys.argv[1]
+if cmd == "map":
+    _map_list(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+elif cmd == "region":
+    _region_fields(sys.argv[2])
+elif cmd == "tg":
+    _tg_payload(sys.argv[2], sys.argv[3], sys.argv[4])
+else:
+    sys.exit(2)
+PY
+}
+
 ensure_uv() {
     export PATH="${UV_PATH}"
     if command -v uv >/dev/null 2>&1; then
@@ -128,8 +210,8 @@ version_lt() {
 # ==========================================================
 # 安装系统依赖与 uv
 # ==========================================================
-echo -e "\n[1/7] 正在探测并安装基础环境依赖 (curl, jq, cron, procps, uv)..."
-REQUIRED_CMDS=("curl" "jq" "crontab" "pgrep" "openssl")
+echo -e "\n[1/7] 正在探测并安装基础环境依赖 (curl, python3, cron, procps, uv)..."
+REQUIRED_CMDS=("curl" "python3" "crontab" "pgrep" "openssl")
 MISSING_CMDS=()
 
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -143,7 +225,7 @@ if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
     
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y >/dev/null 2>&1
-        apt-get install -y --no-install-recommends curl jq cron procps openssl ca-certificates >/dev/null 2>&1
+        apt-get install -y --no-install-recommends curl python3 cron procps openssl ca-certificates >/dev/null 2>&1
         systemctl enable cron >/dev/null 2>&1 && systemctl start cron >/dev/null 2>&1
         
     elif command -v yum >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1 || command -v microdnf >/dev/null 2>&1; then
@@ -160,28 +242,28 @@ if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
         $PKG_MGR install -y epel-release >/dev/null 2>&1 || true
         
         echo -e "\033[90m   (正在拉取核心组件...)\033[0m"
-        $PKG_MGR install -y $OPT_ARGS curl jq cronie procps-ng openssl
+        $PKG_MGR install -y $OPT_ARGS curl python3 cronie procps-ng openssl
         systemctl enable crond >/dev/null 2>&1 && systemctl start crond >/dev/null 2>&1
         
     elif command -v apk >/dev/null 2>&1; then
         echo "Alpine 探测到系统类型为 Alpine Linux，正在执行轻量级安装..."
-        apk add --no-cache curl jq cronie procps bash openssl ca-certificates || apk add --no-cache curl jq procps bash openssl ca-certificates
+        apk add --no-cache curl python3 cronie procps bash openssl ca-certificates || apk add --no-cache curl python3 procps bash openssl ca-certificates
         mkdir -p /var/spool/cron/crontabs
         rc-update add crond default >/dev/null 2>&1
         service crond start >/dev/null 2>&1
         
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -S --needed --noconfirm curl jq cronie procps-ng openssl >/dev/null 2>&1
+        pacman -S --needed --noconfirm curl python cronie procps-ng openssl >/dev/null 2>&1
         mkdir -p /root/.cache/crontab 2>/dev/null
         systemctl enable cronie >/dev/null 2>&1 && systemctl start cronie >/dev/null 2>&1
         
     else
         echo -e "\033[31m❌ 自动安装失败：系统未知的包管理器。\033[0m"
         echo -e "\033[33m⚠️ 请根据您的操作系统，手动执行以下安装命令后重新运行本脚本：\033[0m"
-        echo -e "  Debian/Ubuntu: \033[36mapt-get update && apt-get install -y --no-install-recommends curl jq cron procps openssl\033[0m"
-        echo -e "  CentOS/RHEL:   \033[36myum install -y curl jq cronie procps-ng openssl\033[0m"
-        echo -e "  Alpine Linux:  \033[36mapk add --no-cache curl jq cronie procps bash openssl\033[0m"
-        echo -e "  Arch Linux:    \033[36mpacman -Syu --needed curl jq cronie procps-ng openssl\033[0m"
+        echo -e "  Debian/Ubuntu: \033[36mapt-get update && apt-get install -y --no-install-recommends curl python3 cron procps openssl\033[0m"
+        echo -e "  CentOS/RHEL:   \033[36myum install -y curl python3 cronie procps-ng openssl\033[0m"
+        echo -e "  Alpine Linux:  \033[36mapk add --no-cache curl python3 cronie procps bash openssl\033[0m"
+        echo -e "  Arch Linux:    \033[36mpacman -Syu --needed curl python cronie procps-ng openssl\033[0m"
         exit 1
     fi
     
@@ -291,7 +373,7 @@ echo -e "\033[32m✅ 环境清理完成。\033[0m"
 if [ "$UPGRADE_MODE" == "false" ]; then
 
     echo -e "\n\033[36m📍 请选择大洲 (Continent):\033[0m"
-    jq -r '.continents[] | "\(.id)|\(.name)"' "${SECURE_TMP}/map.json" > "${SECURE_TMP}/continents.txt"
+    _ips_pyjson map "${SECURE_TMP}/map.json" continents _ _ _ > "${SECURE_TMP}/continents.txt"
     i=1; CONT_MAP=()
     while IFS="|" read -r cont_id cont_name; do
         echo "  $i) $cont_name"
@@ -304,7 +386,7 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     CONT_ID="${CONT_MAP[$CONT_SEL]}"
 
     echo -e "\n\033[36m📍 请选择 [$CONT_ID] 下的国家/地区...\033[0m"
-    jq -r ".continents[] | select(.id==\"$CONT_ID\") | .countries[] | \"\(.id)|\(.name)|\(.keyword_file)\"" "${SECURE_TMP}/map.json" > "${SECURE_TMP}/countries.txt"
+    _ips_pyjson map "${SECURE_TMP}/map.json" countries "$CONT_ID" _ _ > "${SECURE_TMP}/countries.txt"
     i=1; COUNTRY_MAP=(); KEYWORD_MAP=()
     while IFS="|" read -r c_id c_name k_file; do
         echo "  $i) $c_name"
@@ -320,7 +402,7 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     REGION_CODE="$COUNTRY_ID" 
 
     echo -e "\n\033[36m📍 请选择 [$COUNTRY_ID] 的省/州...\033[0m"
-    jq -r ".continents[] | select(.id==\"$CONT_ID\") | .countries[] | select(.id==\"$COUNTRY_ID\") | .states[] | \"\(.id)|\(.name)\"" "${SECURE_TMP}/map.json" > "${SECURE_TMP}/states.txt"
+    _ips_pyjson map "${SECURE_TMP}/map.json" states "$CONT_ID" "$COUNTRY_ID" _ > "${SECURE_TMP}/states.txt"
     STATE_COUNT=$(wc -l < "${SECURE_TMP}/states.txt")
 
     if [ "$STATE_COUNT" -eq 1 ]; then
@@ -339,7 +421,7 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     fi
 
     echo -e "\n\033[36m📍 请选择城市:\033[0m"
-    jq -r ".continents[] | select(.id==\"$CONT_ID\") | .countries[] | select(.id==\"$COUNTRY_ID\") | .states[] | select(.id==\"$STATE_ID\") | .cities[] | \"\(.id)|\(.name)\"" "${SECURE_TMP}/map.json" > "${SECURE_TMP}/cities.txt"
+    _ips_pyjson map "${SECURE_TMP}/map.json" cities "$CONT_ID" "$COUNTRY_ID" "$STATE_ID" > "${SECURE_TMP}/cities.txt"
     CITY_COUNT=$(wc -l < "${SECURE_TMP}/cities.txt")
 
     if [ "$CITY_COUNT" -eq 1 ]; then
@@ -559,11 +641,12 @@ if [ "$UPGRADE_MODE" == "false" ]; then
         exit 1
     fi
 
-    REGION_NAME=$(jq -r '.region_name' "$REGION_JSON_FILE")
-    BASE_LAT=$(jq -r '.google_module.base_lat' "$REGION_JSON_FILE")
-    BASE_LON=$(jq -r '.google_module.base_lon' "$REGION_JSON_FILE")
-    LANG_PARAMS=$(jq -r '.google_module.lang_params' "$REGION_JSON_FILE")
-    VALID_URL_SUFFIX=$(jq -r '.google_module.valid_url_suffix' "$REGION_JSON_FILE")
+    mapfile -t _REGION_FIELDS < <(_ips_pyjson region "$REGION_JSON_FILE")
+    REGION_NAME="${_REGION_FIELDS[0]}"
+    BASE_LAT="${_REGION_FIELDS[1]}"
+    BASE_LON="${_REGION_FIELDS[2]}"
+    LANG_PARAMS="${_REGION_FIELDS[3]}"
+    VALID_URL_SUFFIX="${_REGION_FIELDS[4]}"
 
     cat > "$CONFIG_FILE" << EOF
 # IP-Sentinel 本地固化配置 (生成时间: $(date '+%Y-%m-%d %H:%M:%S'))
@@ -976,7 +1059,8 @@ if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
 ⚠️ *架构已变更，请复制下方注册指令并回复机器人以更新 Master 记录：*
 \`${REG_MSG}\`"
             
-            JSON_PAYLOAD=$(jq -n --arg cid "$CHAT_ID" --arg txt "$TEXT_MSG" --arg cb "manage:${NODE_NAME}" '{chat_id: $cid, text: $txt, parse_mode: "Markdown", reply_markup: {inline_keyboard: [[{text: "⚙️ 调出该节点控制台", callback_data: $cb}]]}}')
+            printf '%s' "$TEXT_MSG" > "${SECURE_TMP}/tg_text.txt"
+            JSON_PAYLOAD=$(_ips_pyjson tg "$CHAT_ID" "${SECURE_TMP}/tg_text.txt" "manage:${NODE_NAME}")
             curl -s -X POST "${TG_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" >/dev/null 2>&1
             
             echo -e "\033[32m✅ 升级通知已推送！请前往 TG 点击注册指令完成身份同步！\033[0m"
@@ -988,7 +1072,8 @@ if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
 🌐 IP：\`${SAFE_PUBLIC_IP}\`
 🚀 版本：v${TARGET_VERSION}"
 
-            JSON_PAYLOAD=$(jq -n --arg cid "$CHAT_ID" --arg txt "$TEXT_MSG" --arg cb "manage:${NODE_NAME}" '{chat_id: $cid, text: $txt, parse_mode: "Markdown", reply_markup: {inline_keyboard: [[{text: "⚙️ 调出该节点控制台", callback_data: $cb}]]}}')
+            printf '%s' "$TEXT_MSG" > "${SECURE_TMP}/tg_text.txt"
+            JSON_PAYLOAD=$(_ips_pyjson tg "$CHAT_ID" "${SECURE_TMP}/tg_text.txt" "manage:${NODE_NAME}")
             curl -s -X POST "${TG_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" >/dev/null 2>&1
 
             echo -e "\033[32m✅ 升级成功通知已推送到您的 Telegram！\033[0m"
@@ -1011,7 +1096,8 @@ if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
 🔑 *请点击下方指令复制并回复给机器人：*
 \`${REG_MSG}\`"
 
-        JSON_PAYLOAD=$(jq -n --arg cid "$CHAT_ID" --arg txt "$TEXT_MSG" --arg cb "manage:${NODE_NAME}" '{chat_id: $cid, text: $txt, parse_mode: "Markdown", reply_markup: {inline_keyboard: [[{text: "⚙️ 调出该节点控制台", callback_data: $cb}]]}}')
+        printf '%s' "$TEXT_MSG" > "${SECURE_TMP}/tg_text.txt"
+        JSON_PAYLOAD=$(_ips_pyjson tg "$CHAT_ID" "${SECURE_TMP}/tg_text.txt" "manage:${NODE_NAME}")
         PUSH_RESULT=$(curl -s -X POST "${TG_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD")
 
         if echo "$PUSH_RESULT" | grep -q '"ok":true'; then
