@@ -756,7 +756,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o
 
 TMP_PY="${SECURE_TMP}/py_update"
 mkdir -p "$TMP_PY"
-PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py network.py persona.py geo_probe.py xykt_runner.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
+PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py network.py persona.py geo_probe.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
 for PY_FILE in $PY_FILES; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/${PY_FILE}" -o "${TMP_PY}/${PY_FILE}"
 done
@@ -768,7 +768,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/.python-version" -o "
 # 校验下载文件完整性，失败则不覆盖现有安装
 if [ ! -s "$TMP_UNINSTALL" ] || [ ! -s "${TMP_PY}/runner.py" ] || \
    [ ! -s "${TMP_PY}/webhook.py" ] || [ ! -s "${TMP_PY}/agent_daemon.py" ] || \
-   [ ! -s "${TMP_PY}/xykt_runner.py" ] || [ ! -s "${TMP_PY}/ip_quality_probe.py" ] || [ ! -s "${TMP_PY}/mod_quality.py" ] || \
+   [ ! -s "${TMP_PY}/ip_quality_probe.py" ] || [ ! -s "${TMP_PY}/mod_quality.py" ] || \
    [ ! -s "${TMP_PY}/tg_util.py" ] || \
    [ ! -s "${SECURE_TMP}/pyproject.toml" ] || [ ! -s "${SECURE_TMP}/uv.lock" ]; then
     echo -e "\033[31m❌ 下载失败：核心文件缺失或为空，请检查网络或 GitHub Raw 可用性。\033[0m"

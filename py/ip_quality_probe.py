@@ -592,8 +592,7 @@ def _probe_curl_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _run_native_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
-    """内置 Python 探针（xykt 不可用时的回退）."""
+def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
     probe_cfg = _probe_curl_cfg(cfg)
     ctx = build_curl_context(probe_cfg, lambda lvl, msg: _log(log_fn, lvl, msg))
     ua = DEFAULT_UA
@@ -668,19 +667,3 @@ def _run_native_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) 
             "DNSBlacklist": {"Blacklisted": "0", "Marked": "0", "Total": "0", "Clean": "0"},
         },
     }
-
-
-def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
-    """
-    优先 xykt/IPQuality（bash 深海声呐同款：绑定寻路 + 预检阶梯 + ip.sh），
-    失败时回退内置 Python 探针。
-    """
-    from xykt_runner import run_xykt_probe
-
-    _log(log_fn, "INFO ", "质量探针: 尝试 xykt/IPQuality（阶梯预检）…")
-    data = run_xykt_probe(cfg, log_fn)
-    if data:
-        return data
-
-    _log(log_fn, "WARN ", "xykt 探针不可用或失败，回退内置 Python 探针")
-    return _run_native_quality_probe(cfg, log_fn)
