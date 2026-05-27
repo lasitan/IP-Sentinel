@@ -24,6 +24,11 @@ def load_lines(path: Path) -> list[str]:
     return [ln.strip() for ln in path.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()]
 
 
+def is_mobile_ua(ua: str) -> bool:
+    u = ua.lower()
+    return any(k in u for k in ("mobile", "android", "iphone", "ipad", "ipod"))
+
+
 def pick_session_ua(ua_pool: Sequence[str], seed_ip: str) -> str:
     if not ua_pool:
         return DEFAULT_UA
@@ -34,6 +39,14 @@ def pick_session_ua(ua_pool: Sequence[str], seed_ip: str) -> str:
     idx3 = (seed * 31) % total
     pool = [ua_pool[idx1], ua_pool[idx2], ua_pool[idx3]]
     return random.choice(pool)
+
+
+def pick_browser_ua(ua_pool: Sequence[str], seed_ip: str) -> str:
+    """Playwright/Chromium 用桌面 UA（Earth Web 在移动端 UA 下常不加载 earth-app）."""
+    desktop = [ua for ua in ua_pool if ua and not is_mobile_ua(ua)]
+    if desktop:
+        return pick_session_ua(desktop, seed_ip)
+    return DEFAULT_UA
 
 
 def random_coord(base: float, range_units: int) -> float:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
@@ -47,6 +48,18 @@ _CHROMIUM_ARGS = [
     "--no-first-run",
     "--no-default-browser-check",
 ]
+_BROWSER_VIEWPORT = {"width": 1920, "height": 1080}
+_EARTH_UI_SELECTORS = (
+    "earth-app",
+    "earth-view-status",
+    "canvas#glcanvas",
+    "canvas",
+)
+_EARTH_WASM_LABELS = (
+    "Launch Wasm Multiple Threaded",
+    "Launch Wasm Single Threaded",
+    "启动",
+)
 
 _DEFAULT_GEO_ORIGINS = (
     "https://www.google.com",
@@ -290,6 +303,64 @@ def _apply_cdp_geolocation(
         _log("WARN ", f"[{tag}] CDP Geolocation 覆写失败: {exc}")
 
 
+def _is_usable_page_url(url: str) -> bool:
+    if not url or url.startswith("about:"):
+        return False
+    return not url.startswith("chrome-error://")
+
+
+def _wait_for_page_url(
+    page: Page,
+    *,
+    must_contain: str | None = None,
+    max_sec: float = 30.0,
+) -> str:
+    """ERR_ABORTED 后 page.url 可能短暂仍为 about:blank，轮询直至落地."""
+    deadline = time.monotonic() + max_sec
+    while time.monotonic() < deadline:
+        current = page.url or ""
+        if _is_usable_page_url(current):
+            if must_contain is None or must_contain in current:
+                return current
+        page.wait_for_timeout(400)
+    return page.url or ""
+
+
+def _recover_after_nav_abort(
+    page: Page,
+    _emit: Callable[[str, str], None],
+    tag: str,
+    *,
+    must_contain: str | None = None,
+) -> bool:
+    settled = _wait_for_page_url(page, must_contain=must_contain, max_sec=35.0)
+    if not _is_usable_page_url(settled):
+        return False
+    _emit("INFO ", f"[{tag}] 导航中断后已落地: {settled}")
+    for state in ("domcontentloaded", "load"):
+        try:
+            page.wait_for_load_state(state, timeout=45_000)
+            _emit("INFO ", f"[{tag}] 重定向后页面就绪 ({state})")
+            return True
+        except Exception:
+            continue
+    return "google.com" in settled
+
+
+def _is_nav_abort_error(exc: Exception) -> bool:
+    err = str(exc).upper()
+    return any(
+        m in err
+        for m in (
+            "ERR_ABORTED",
+            "NS_BINDING_ABORTED",
+            "NAVIGATION",
+            "INTERRUPTED",
+            "TARGET CLOSED",
+        )
+    )
+
+
 def _goto_follow_redirects(
     page: Page,
     url: str,
@@ -297,21 +368,25 @@ def _goto_follow_redirects(
     tag: str,
     *,
     timeout: float = 120_000,
+    url_must_contain: str | None = None,
 ) -> None:
     """
-    导航并容忍重定向链导致的 ERR_ABORTED（首跳被下一跳取消时仍视为成功）.
+    导航并容忍重定向/Wasm 重载导致的 ERR_ABORTED（不强制 wait_until=load）.
     """
     last_exc: Exception | None = None
+    url_hint = url_must_contain or (
+        "earth.google.com" if tag == "EARTH_GEO" else "google.com"
+    )
 
     def _emit(level: str, msg: str) -> None:
         if _log:
             _log(level, msg)
 
-    for wait_until in ("commit", "domcontentloaded", "load"):
+    for wait_until in ("commit", "domcontentloaded"):
         try:
             resp = page.goto(url, wait_until=wait_until, timeout=timeout)
             final = page.url or ""
-            if final and not final.startswith("about:"):
+            if _is_usable_page_url(final):
                 status = resp.status if resp else "?"
                 _emit(
                     "INFO ",
@@ -320,24 +395,33 @@ def _goto_follow_redirects(
                 return
         except Exception as exc:
             last_exc = exc
-            err_text = str(exc)
-            current = page.url or ""
-            if "ERR_ABORTED" in err_text and current and not current.startswith("about:"):
-                _emit(
-                    "INFO ",
-                    f"[{tag}] 首跳因重定向中断 (ERR_ABORTED)，已跟随至: {current}",
-                )
-                for state in ("domcontentloaded", "load", "networkidle"):
-                    try:
-                        page.wait_for_load_state(state, timeout=60_000)
-                        _emit("INFO ", f"[{tag}] 重定向后页面就绪 ({state})")
-                        return
-                    except Exception:
-                        continue
-                if "earth.google.com" in current or "google.com" in current:
+            if _is_nav_abort_error(exc):
+                if _recover_after_nav_abort(
+                    page, _emit, tag, must_contain=url_hint
+                ):
                     return
-            if wait_until == "load":
-                break
+                if _recover_after_nav_abort(page, _emit, tag, must_contain=None):
+                    return
+
+    # 最后一试：仅 commit，随后轮询 URL（Earth Wasm 常取消 load 事件）
+    try:
+        page.goto(url, wait_until="commit", timeout=timeout)
+        final = _wait_for_page_url(page, must_contain=url_hint, max_sec=40.0)
+        if _is_usable_page_url(final):
+            _emit("INFO ", f"[{tag}] 导航完成 (commit+poll) → {final}")
+            return
+    except Exception as exc:
+        last_exc = exc
+        if _is_nav_abort_error(exc) and _recover_after_nav_abort(
+            page, _emit, tag, must_contain=url_hint
+        ):
+            return
+
+    if tag == "EARTH_GEO":
+        final = _wait_for_page_url(page, must_contain="earth.google.com", max_sec=15.0)
+        if "earth.google.com" in final:
+            _emit("WARN ", f"[{tag}] Earth 导航异常后仍进入页面，继续: {final}")
+            return
 
     if last_exc:
         raise last_exc
@@ -355,6 +439,56 @@ def _try_click_text(page: Page, labels: tuple[str, ...], timeout_ms: int = 3000)
     return None
 
 
+def _earth_try_launch_wasm(page: Page, _log: LogFn) -> bool:
+    clicked = _try_click_text(page, _EARTH_WASM_LABELS, timeout_ms=8000)
+    if clicked:
+        _log("INFO ", f"[EARTH_GEO] 已启动 Earth Wasm: {clicked}")
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=120_000)
+        except Exception:
+            pass
+        page.wait_for_timeout(8000)
+        return True
+    return False
+
+
+def _earth_page_has_ui(page: Page) -> str | None:
+    for sel in _EARTH_UI_SELECTORS:
+        try:
+            if page.locator(sel).first.count() > 0:
+                return sel
+        except Exception:
+            continue
+    return None
+
+
+def _earth_wait_ui_ready(page: Page, _log: LogFn, *, max_sec: float = 45.0) -> bool:
+    """轮询 earth-app / canvas；遇不支持页则尝试启动 Wasm。"""
+    deadline = time.monotonic() + max_sec
+    wasm_tried = False
+    while time.monotonic() < deadline:
+        hit = _earth_page_has_ui(page)
+        if hit:
+            _log("INFO ", f"[EARTH_GEO] Earth UI 已就绪: {hit}")
+            page.wait_for_timeout(2000)
+            return True
+        body = ""
+        try:
+            body = page.evaluate("() => (document.body?.innerText || '').slice(0, 500)")
+        except Exception:
+            pass
+        if not wasm_tried and (
+            "isn't supported" in body
+            or "不支持" in body
+            or "Launch Wasm" in body
+        ):
+            wasm_tried = True
+            _earth_try_launch_wasm(page, _log)
+        page.wait_for_timeout(2000)
+    _log("WARN ", f"[EARTH_GEO] Earth UI 未在 {int(max_sec)}s 内挂载，继续尝试定位按钮")
+    return False
+
+
 def _earth_enter_explore_and_locate(
     page: Page,
     latitude: float,
@@ -362,37 +496,21 @@ def _earth_enter_explore_and_locate(
     _log: LogFn,
 ) -> None:
     page.wait_for_timeout(2000)
-    clicked = _try_click_text(
-        page,
-        ("Launch Wasm Multiple Threaded", "Launch Wasm Single Threaded"),
-        timeout_ms=4000,
-    )
-    if clicked:
-        _log("INFO ", f"[EARTH_GEO] 已启动 Earth Wasm: {clicked}")
-        try:
-            page.wait_for_load_state("domcontentloaded", timeout=120_000)
-        except Exception:
-            pass
-        page.wait_for_timeout(5000)
+    _earth_try_launch_wasm(page, _log)
 
     explore = earth_explore_url(latitude, longitude)
     if "/web/@" not in page.url:
         _log("INFO ", f"[EARTH_GEO] 跳转探索地球: {explore}")
-        _goto_follow_redirects(page, explore, _log, "EARTH_GEO")
-        page.wait_for_timeout(4000)
+        _goto_follow_redirects(
+            page, explore, _log, "EARTH_GEO", url_must_contain="earth.google.com"
+        )
+        page.wait_for_timeout(3000)
     else:
         _log("INFO ", "[EARTH_GEO] 已在 Earth Web 探索视图")
 
+    _earth_try_launch_wasm(page, _log)
     _earth_trigger_my_location(page, _log)
     page.wait_for_timeout(2000)
-
-
-def _earth_wait_ui_ready(page: Page, _log: LogFn) -> None:
-    try:
-        page.wait_for_selector("earth-app", state="attached", timeout=90_000)
-    except Exception:
-        _log("WARN ", "[EARTH_GEO] earth-app 未在时限内挂载，继续尝试定位按钮")
-    page.wait_for_timeout(5000)
 
 
 def _earth_click_show_my_location_playwright(page: Page, _log: LogFn) -> bool:
@@ -441,7 +559,7 @@ def _earth_click_show_my_location_playwright(page: Page, _log: LogFn) -> bool:
 
 
 def _earth_trigger_my_location(page: Page, _log: LogFn) -> None:
-    _earth_wait_ui_ready(page, _log)
+    ui_ok = _earth_wait_ui_ready(page, _log, max_sec=45.0)
 
     if _earth_click_show_my_location_playwright(page, _log):
         page.wait_for_timeout(2500)
@@ -455,10 +573,17 @@ def _earth_trigger_my_location(page: Page, _log: LogFn) -> None:
         page.wait_for_timeout(2500)
         return
 
-    _log(
-        "WARN ",
-        "[EARTH_GEO] 未找到「显示您的位置」按钮，已依赖深链坐标与 Geolocation API",
-    )
+    if not ui_ok:
+        _log(
+            "WARN ",
+            "[EARTH_GEO] 未找到「显示您的位置」按钮（Earth UI 未完全加载，"
+            "已使用桌面 UA + 深链坐标；Geolocation API 仍可用）",
+        )
+    else:
+        _log(
+            "WARN ",
+            "[EARTH_GEO] 未找到「显示您的位置」按钮，已依赖深链坐标与 Geolocation API",
+        )
 
 
 def _visit_with_geolocation(
@@ -487,6 +612,7 @@ def _visit_with_geolocation(
             context = browser.new_context(
                 user_agent=user_agent,
                 locale=locale,
+                viewport=_BROWSER_VIEWPORT,
                 geolocation={"latitude": latitude, "longitude": longitude},
             )
             _wire_auto_geolocation(
@@ -498,7 +624,18 @@ def _visit_with_geolocation(
             page = context.new_page()
             _apply_cdp_geolocation(context, page, latitude, longitude, _log, tag)
 
-            _goto_follow_redirects(page, seed_url, _log, tag)
+            try:
+                _goto_follow_redirects(page, seed_url, _log, tag)
+            except Exception as nav_exc:
+                if tag == "EARTH_GEO" and _recover_after_nav_abort(
+                    page,
+                    lambda lvl, msg: _log(lvl, msg),
+                    tag,
+                    must_contain="earth.google.com",
+                ):
+                    _log("WARN ", f"[{tag}] 主导航异常已恢复: {nav_exc}")
+                else:
+                    raise
             if on_loaded:
                 on_loaded(page)
 
@@ -556,10 +693,9 @@ def visit_google_earth(
         _earth_log("INFO ", "[EARTH_GEO] Earth 探索视图已加载，进入定位流程…")
         _earth_enter_explore_and_locate(page, lat, lon, _earth_log)
 
-    # 先进入 /web/ 探索入口（根域常会 302→/web，易触发 ERR_ABORTED）
-    seed = earth_explore_url(latitude, longitude)
+    # 先进 /web/ 再由 on_loaded 深链到 @坐标（直接 @ 深链易触发 Wasm 重载 ERR_ABORTED）
     return _visit_with_geolocation(
-        seed_url=seed,
+        seed_url="https://earth.google.com/web/",
         latitude=latitude,
         longitude=longitude,
         user_agent=user_agent,

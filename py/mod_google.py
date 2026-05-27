@@ -24,7 +24,7 @@ from maps_browser import (
     visit_google_maps,
 )
 from network import build_curl_context, fetch_headers, fetch_text, http_status
-from persona import load_lines, pick_session_ua, random_coord, uri_encode_keyword
+from persona import load_lines, pick_browser_ua, pick_session_ua, random_coord, uri_encode_keyword
 
 MODULE = "Google"
 
@@ -46,6 +46,7 @@ def run(cfg: dict | None = None) -> int:
     keywords = load_lines(kw_file)
     current_ip = cfg.get("PUBLIC_IP") or cfg.get("BIND_IP") or "Unknown"
     session_ua = pick_session_ua(ua_pool, str(current_ip))
+    browser_ua = pick_browser_ua(ua_pool, str(current_ip))
 
     base_lat = float(cfg.get("BASE_LAT", 0))
     base_lon = float(cfg.get("BASE_LON", 0))
@@ -60,6 +61,8 @@ def run(cfg: dict | None = None) -> int:
 
     log(cfg, MODULE, "INFO ", f"当前出网 IP: {current_ip}")
     log(cfg, MODULE, "INFO ", f"设备指纹锁定: {session_ua[:45]}...")
+    if browser_ua != session_ua:
+        log(cfg, MODULE, "INFO ", f"浏览器 UA (桌面): {browser_ua[:45]}...")
     log(
         cfg,
         MODULE,
@@ -85,7 +88,7 @@ def run(cfg: dict | None = None) -> int:
         result = visit_google_earth(
             latitude=lat,
             longitude=lon,
-            user_agent=session_ua,
+            user_agent=browser_ua,
             locale=maps_locale,
             log=_log,
         )
@@ -134,7 +137,7 @@ def run(cfg: dict | None = None) -> int:
                     maps_url=url,
                     latitude=action_lat,
                     longitude=action_lon,
-                    user_agent=session_ua,
+                    user_agent=browser_ua,
                     locale=maps_locale,
                     log=_log,
                 )
