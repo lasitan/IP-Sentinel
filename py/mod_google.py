@@ -17,6 +17,7 @@ from geo_probe import (
     target_country_code,
 )
 from log_util import log
+from maps_browser import maps_geo_enabled, parse_lang_locale, visit_google_maps
 from network import build_curl_context, fetch_headers, fetch_text, http_status
 from persona import load_lines, pick_session_ua, random_coord, uri_encode_keyword
 
@@ -47,6 +48,8 @@ def run(cfg: dict | None = None) -> int:
     session_lon = random_coord(base_lon, 270)
     total_actions = random.randint(5, 8)
     lang = cfg.get("LANG_PARAMS", "hl=en&gl=US")
+    maps_geo_mode = maps_geo_enabled(cfg)
+    maps_locale = parse_lang_locale(lang)
 
     log(cfg, MODULE, "INFO ", f"当前出网 IP: {current_ip}")
     log(cfg, MODULE, "INFO ", f"设备指纹锁定: {session_ua[:45]}...")
@@ -75,7 +78,34 @@ def run(cfg: dict | None = None) -> int:
                 f"https://www.google.com/maps/search/{encoded}/"
                 f"@{action_lat},{action_lon},17z?{lang}"
             )
-            code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
+            code = 0
+            if maps_geo_mode in ("true", "auto"):
+                geo_result = visit_google_maps(
+                    maps_url=url,
+                    latitude=action_lat,
+                    longitude=action_lon,
+                    user_agent=session_ua,
+                    locale=maps_locale,
+                    log=_log,
+                )
+                if geo_result == "ok":
+                    code = 200
+                    log(
+                        cfg,
+                        MODULE,
+                        "INFO ",
+                        f"Maps 已用 Chromium Geolocation 定位至搜索坐标: {action_lat}, {action_lon}",
+                    )
+                elif geo_result == "skip":
+                    log(cfg, MODULE, "WARN ", "未安装 Playwright/Chromium，Maps 回退为 HTTP 访问。")
+                else:
+                    log(cfg, MODULE, "WARN ", f"Maps 浏览器访问失败 ({geo_result})，回退为 HTTP。")
+
+            if code != 200:
+                if maps_geo_mode == "true" and code == 0:
+                    log(cfg, MODULE, "ERROR", "ENABLE_MAPS_GEO=true 但浏览器不可用，跳过 Maps。")
+                else:
+                    code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
         else:
             url = "https://connectivitycheck.gstatic.com/generate_204"
             code = http_status(url, ctx, ua=session_ua, follow=False, timeout=10)

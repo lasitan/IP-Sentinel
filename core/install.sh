@@ -581,6 +581,7 @@ NODE_NAME="$NODE_NAME"
 NODE_ALIAS="$NODE_ALIAS"
 
 ENABLE_OTA="$ENABLE_OTA"
+ENABLE_MAPS_GEO="auto"
 EOF
 
     chmod 600 "$CONFIG_FILE"
@@ -643,6 +644,9 @@ if [ "$UPGRADE_MODE" == "true" ]; then
     else
         ENABLE_OTA=$(grep "^ENABLE_OTA=" "$CONFIG_FILE" | cut -d'"' -f2)
     fi
+    if ! grep -q "^ENABLE_MAPS_GEO=" "$CONFIG_FILE"; then
+        echo "ENABLE_MAPS_GEO=\"auto\"" >> "$CONFIG_FILE"
+    fi
 fi
 
 # ==========================================================
@@ -656,7 +660,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o
 
 TMP_PY="${SECURE_TMP}/py_update"
 mkdir -p "$TMP_PY"
-PY_FILES="__init__.py config.py log_util.py network.py persona.py geo_probe.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
+PY_FILES="__init__.py config.py log_util.py network.py persona.py geo_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
 for PY_FILE in $PY_FILES; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/${PY_FILE}" -o "${TMP_PY}/${PY_FILE}"
 done

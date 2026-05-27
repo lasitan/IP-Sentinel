@@ -11,6 +11,9 @@ dependencies = []
 dev = [
     "ruff>=0.9",
 ]
+maps = [
+    "playwright>=1.49",
+]
 
 [tool.uv]
 package = false
