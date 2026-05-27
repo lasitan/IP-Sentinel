@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""数据 OTA：UA 库、关键词、区域 JSON、探针脚本与日志清理."""
+"""数据 OTA：UA 库、关键词、区域 JSON 与日志清理."""
 
 from __future__ import annotations
 
@@ -81,20 +81,7 @@ def run() -> int:
             tmp_json.unlink(missing_ok=True)
             _log("WARN ", "❌ 区域规则下载失败，保留本地旧数据")
 
-    tmp_probe = Path("/tmp/ip_sentinel_probe.sh")
-    if _curl_download(ctx, "https://raw.githubusercontent.com/xykt/IPQuality/main/ip.sh", tmp_probe):
-        text = tmp_probe.read_text(encoding="utf-8", errors="ignore")
-        if "xykt" in text:
-            dest = core / "ip_probe.sh"
-            tmp_probe.replace(dest)
-            dest.chmod(0o755)
-            _log("INFO ", "✅ ip_probe.sh 已更新")
-        else:
-            tmp_probe.unlink(missing_ok=True)
-            _log("WARN ", "❌ ip_probe.sh 下载失败，保留本地旧版本")
-    else:
-        tmp_probe.unlink(missing_ok=True)
-        _log("WARN ", "❌ 探针源文件拉取失败，保留本地旧版本")
+    _log("INFO ", "ℹ️ IP 质量探针已内置为 Python (ip_quality_probe)，不再拉取 bash ip_probe.sh")
 
     log_file = Path(cfg.get("LOG_FILE", install / "logs" / "sentinel.log"))
     removed = prune_log_file(log_file, keep_days=LOG_RETENTION_DAYS)

@@ -1,108 +1,19 @@
 #!/usr/bin/env python3
-"""IP 质量检测 (基于 xykt/ip_probe 脚本与 JSON 解析)."""
+"""IP 质量检测（原生 Python 探针，Telegram 报告）."""
 
 from __future__ import annotations
 
-import json
 import re
-import subprocess
 import sys
-import urllib.error
-import urllib.request
+import traceback
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config import require_config
+from ip_quality_probe import run_quality_probe
 from log_util import log
-from network import CurlContext, build_curl_context, preflight
+from tg_util import build_svq_callback, escape_markdown, tg_post
 
 MODULE = "Quality"
-
-DEFAULT_INSTALL = "/opt/ip_sentinel"
-PROBE_URLS = (
-    "https://raw.githubusercontent.com/xykt/IPQuality/main/ip.sh",
-    "https://IP.Check.Place",
-)
-
-
-def _probe_path(cfg: dict) -> Path:
-    return Path(cfg.get("INSTALL_DIR", DEFAULT_INSTALL)) / "core" / "ip_probe.sh"
-
-
-def _ensure_probe(cfg: dict) -> bool:
-    probe_path = _probe_path(cfg)
-    if probe_path.is_file():
-        try:
-            if "xykt" in probe_path.read_text(encoding="utf-8", errors="ignore"):
-                return True
-        except OSError:
-            pass
-        probe_path.unlink(missing_ok=True)
-
-    for url in PROBE_URLS:
-        subprocess.run(
-            ["curl", "-sL", "-m", "15" if "Check" in url else "10", url, "-o", str(probe_path)],
-            check=False,
-        )
-        if probe_path.is_file():
-            try:
-                if "xykt" in probe_path.read_text(encoding="utf-8", errors="ignore"):
-                    probe_path.chmod(0o755)
-                    return True
-            except OSError:
-                pass
-        probe_path.unlink(missing_ok=True)
-    return False
-
-
-def _probe_args(cfg: dict) -> list[str]:
-    args = ["-y", "-j", "-f"]
-    ctx = build_curl_context(cfg)
-    raw = (cfg.get("BIND_IP") or "").strip("[]")
-    ip_ver = str(ctx.ip_version)
-
-    if raw and ctx.bind_opt:
-        args.extend(["-i", raw, f"-{ip_ver}"])
-        primary = args[:]
-        if preflight(CurlContext(bind_opt=["--interface", cfg["BIND_IP"]], ip_flag=f"-{ip_ver}")):
-            return primary
-        fallback = ["-y", "-j", f"-{ip_ver}"]
-        if preflight(CurlContext(bind_opt=[], ip_flag=f"-{ip_ver}")):
-            return fallback
-        return ["-y", "-j"]
-    args.append(f"-{cfg.get('IP_PREF', '4')}")
-    ctx2 = CurlContext(bind_opt=[], ip_flag=f"-{cfg.get('IP_PREF', '4')}")
-    if preflight(ctx2):
-        return args
-    return ["-y", "-j"]
-
-
-def _strip_ansi(text: str) -> str:
-    text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
-    text = re.sub(r"x1b\[[0-9;]*[a-zA-Z]", "", text)
-    return text
-
-
-def _run_probe(probe_path: Path, args: list[str]) -> dict | None:
-    try:
-        raw = subprocess.run(
-            ["timeout", "300", "bash", str(probe_path), *args],
-            capture_output=True,
-            text=True,
-            timeout=310,
-            check=False,
-        ).stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-    raw = _strip_ansi(raw or "")
-    idx = raw.find("{")
-    if idx < 0:
-        return None
-    try:
-        return json.loads(raw[idx:])
-    except json.JSONDecodeError:
-        return None
 
 
 def _parse_media(data: dict, key: str) -> str:
@@ -111,73 +22,66 @@ def _parse_media(data: dict, key: str) -> str:
     reg = media.get("Region", "")
     typ = media.get("Type", "")
     if "解锁" in status:
-        return f"🟢 {reg} ({typ})"
-    if any(x in status for x in ("仅", "机房", "待支持")):
-        return f"🟡 {status} {reg}"
+        return f"🟢 {escape_markdown(reg)} ({escape_markdown(typ)})"
+    if any(x in status for x in ("仅", "机房", "待支持", "待确认")):
+        return f"🟡 {escape_markdown(status)} {escape_markdown(reg)}"
     if any(x in status for x in ("屏蔽", "失败", "中国", "禁")):
-        return f"🔴 {status}"
-    return f"⚪ {status}"
+        return f"🔴 {escape_markdown(status)}"
+    return f"⚪ {escape_markdown(status)}"
 
 
 def _tg_post(cfg: dict, payload: dict) -> bool:
     api_url = cfg.get("TG_API_URL", "")
-    if not api_url or not cfg.get("CHAT_ID"):
+    chat_id = cfg.get("CHAT_ID", "")
+    if not api_url or not chat_id:
         log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法推送质量报告")
         return False
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = resp.read().decode(errors="ignore")
-            if '"ok":true' in body:
-                log(cfg, MODULE, "INFO ", "质量报告已推送至 Telegram")
-                return True
-            log(cfg, MODULE, "WARN ", f"Telegram 返回异常: {body[:200]}")
-            return False
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        log(cfg, MODULE, "ERROR", f"Telegram 推送失败: {exc}")
-        return False
+    payload = {**payload, "chat_id": chat_id}
+    ok, err = tg_post(api_url, payload)
+    if ok:
+        if err == "plain":
+            log(cfg, MODULE, "WARN ", "Markdown 解析失败，已降级为纯文本推送")
+        else:
+            log(cfg, MODULE, "INFO ", "质量报告已推送至 Telegram")
+        return True
+    log(cfg, MODULE, "ERROR", f"Telegram 推送失败: {err}")
+    return False
 
 
-def run() -> int:
-    cfg = require_config()
+def _format_score_label(name: str, val: str) -> str:
+    if val == "N/A":
+        return f"• **{name}:** `N/A`"
+    return f"• **{name}:** `{escape_markdown(val)}/100`"
+
+
+def _port25_label(mail: dict) -> str:
+    port25 = mail.get("Port25")
+    if port25 is None:
+        return "⏸️ 未测（绑定出口或协议不兼容）"
+    return "✅ 畅通" if port25 is True else "❌ 封堵"
+
+
+def _run_inner(cfg: dict) -> int:
     node_alias = cfg.get("NODE_ALIAS") or cfg.get("NODE_NAME", "未知")
     log(cfg, MODULE, "START", f"========== IP 质量检测启动 [节点: {node_alias}] ==========")
 
-    probe_path = _probe_path(cfg)
-    if not _ensure_probe(cfg):
-        log(cfg, MODULE, "ERROR", "ip_probe.sh 下载或校验失败")
-        _tg_post(
-            cfg,
-            {
-                "chat_id": cfg["CHAT_ID"],
-                "parse_mode": "Markdown",
-                "text": (
-                    "❌ *IP 质量检测失败*\n"
-                    f"📍 节点：`{node_alias}`\n"
-                    "⚠️ 探针脚本下载失败。"
-                ),
-            },
-        )
-        log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (探针不可用) ==========")
-        return 1
+    def _probe_log(level: str, msg: str) -> None:
+        log(cfg, MODULE, level, msg)
 
-    args = _probe_args(cfg)
-    log(cfg, MODULE, "INFO ", f"执行探针: bash ip_probe.sh {' '.join(args)}")
-    data = _run_probe(probe_path, args)
+    log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（原生，无 bash）")
+    data = run_quality_probe(cfg, _probe_log)
 
     if not data or not data.get("Head", {}).get("IP"):
-        log(cfg, MODULE, "ERROR", "探针未返回有效 JSON（超时或解析失败）")
+        log(cfg, MODULE, "ERROR", "探针未返回有效结果")
         _tg_post(
             cfg,
             {
-                "chat_id": cfg["CHAT_ID"],
                 "parse_mode": "Markdown",
                 "text": (
                     "❌ *IP 质量检测失败*\n"
-                    f"📍 节点：`{node_alias}`\n"
-                    f"🌐 IP：`{cfg.get('PUBLIC_IP', '')}`\n"
-                    "⚠️ 未收到有效结果（超时或解析失败）。"
+                    f"📍 节点：`{escape_markdown(node_alias)}`\n"
+                    f"🌐 IP：`{escape_markdown(cfg.get('PUBLIC_IP', ''))}`\n"
+                    "⚠️ 探针未返回有效结果（网络或解析失败）。"
                 ),
             },
         )
@@ -187,12 +91,12 @@ def run() -> int:
     info = data.get("Info", {})
     head = data.get("Head", {})
     ip_addr = head.get("IP", "")
-    asn = info.get("ASN", "Unknown")
-    org = info.get("Organization", "Unknown")
-    city = info.get("City", {}).get("Name", "Unknown")
-    country = info.get("Region", {}).get("Name", "Unknown")
-    ip_type = info.get("Type", "未知属性")
-    usage = data.get("Type", {}).get("Usage", {}).get("IPinfo", "未知场景")
+    asn = escape_markdown(info.get("ASN", "Unknown"))
+    org = escape_markdown(info.get("Organization", "Unknown"))
+    city = escape_markdown(info.get("City", {}).get("Name", "Unknown"))
+    country = escape_markdown(info.get("Region", {}).get("Name", "Unknown"))
+    ip_type = escape_markdown(info.get("Type", "未知属性"))
+    usage = escape_markdown(data.get("Type", {}).get("Usage", {}).get("IPinfo", "未知场景"))
 
     scores = data.get("Score", {})
     scam = scores.get("SCAMALYTICS") or "N/A"
@@ -200,6 +104,7 @@ def run() -> int:
     ipqs = scores.get("IPQS") or "N/A"
     ip2l = scores.get("IP2LOCATION") or "N/A"
     fraud = scores.get("ipapi") or "N/A"
+
     def _clean(v):
         return "N/A" if v in (None, "null", "") else v
 
@@ -223,24 +128,37 @@ def run() -> int:
     raw_yt_reg = data.get("Media", {}).get("Youtube", {}).get("Region", "")
     raw_yt_stat = data.get("Media", {}).get("Youtube", {}).get("Status", "")
     raw_nf = data.get("Media", {}).get("Netflix", {}).get("Status", "Unknown")
+    raw_gpt = data.get("Media", {}).get("ChatGPT", {}).get("Status", "未知")
 
     warning = ""
-    if raw_yt_reg == "CN" or "中国" in (raw_yt_stat or ""):
+    if raw_yt_reg == "CN" or raw_yt_stat == "中国":
         warning = "\n🚨 **Google 地理判定为中国大陆。**\n"
 
-    port25 = data.get("Mail", {}).get("Port25") is True
-    p25 = "✅ 畅通" if port25 else "❌ 封堵"
-    dns = data.get("Mail", {}).get("DNSBlacklist", {})
-    dns_b = dns.get("Blacklisted", "0")
-    dns_m = dns.get("Marked", "0")
+    mail = data.get("Mail", {})
+    p25 = _port25_label(mail)
+    dns = mail.get("DNSBlacklist", {})
+    dns_b = escape_markdown(str(dns.get("Blacklisted", "0")))
+    dns_m = escape_markdown(str(dns.get("Marked", "0")))
 
-    local_ver = cfg.get("AGENT_VERSION", "未知")
+    local_ver = escape_markdown(cfg.get("AGENT_VERSION", "未知"))
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    link_ip = (cfg.get("PUBLIC_IP") or "").strip("[]")
+    link_ip = (cfg.get("PUBLIC_IP") or ip_addr or "").strip("[]")
+    safe_ip = escape_markdown(ip_addr)
+    safe_alias = escape_markdown(node_alias)
+
+    score_lines = "\n".join(
+        [
+            _format_score_label("Scamalytics", str(scam)),
+            _format_score_label("AbuseIPDB", str(abuse)),
+            _format_score_label("IPQS", str(ipqs)),
+            _format_score_label("IP2Location", str(ip2l)),
+            f"• **IPAPI 风险率:** `{escape_markdown(fraud)}`",
+        ]
+    )
 
     report = f"""🎯 *IP-Sentinel IP 质量报告*
-📍 节点：`{node_alias}`
-🌐 地址：`{ip_addr}`{warning}
+📍 节点：`{safe_alias}`
+🌐 地址：`{safe_ip}`{warning}
 
 *🏢 物理身份与网络属性*
 `AS{asn}` | `{org}`
@@ -249,11 +167,7 @@ def run() -> int:
 **探针:** {is_proxy}
 
 *🛡️ 风险评分 (越低越好)*
-• **Scamalytics:** `{scam}/100`
-• **AbuseIPDB:** `{abuse}/100`
-• **IPQS:** `{ipqs}/100`
-• **IP2Location:** `{ip2l}/100`
-• **IPAPI 风险率:** `{fraud}`
+{score_lines}
 
 *🎬 核心业务解锁*
 • **YouTube:** {yt}
@@ -268,17 +182,15 @@ def run() -> int:
 • **DNS 污染库:** 严重 `{dns_b}` | 轻微 `{dns_m}`
 
 _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{link_ip})_
+_⚙️ 探针: Python 原生 · 流媒体并行检测_
 
 ⏱️ `{now}` | ⚙️ `v{local_ver}`"""
 
     safe_scam = re.sub(r"[^0-9]", "", str(scam)) or "0"
-    raw_goog = raw_yt_reg or raw_yt_stat or "未知"
-    raw_gpt = data.get("Media", {}).get("ChatGPT", {}).get("Status", "未知")
     node_name = cfg.get("NODE_NAME", "Unknown")
-    cb = f"svq|{node_name}|{safe_scam}|{raw_goog}|{raw_nf}|{raw_gpt}".replace("\n", " ").replace("\r", " ")
+    cb = build_svq_callback(node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_nf, raw_gpt)
 
     payload = {
-        "chat_id": cfg["CHAT_ID"],
         "text": report,
         "parse_mode": "Markdown",
         "disable_web_page_preview": True,
@@ -295,6 +207,36 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
         log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")
     log(cfg, MODULE, "END  ", "========== IP 质量检测结束 ==========")
     return 0
+
+
+def run() -> int:
+    try:
+        cfg = require_config()
+    except SystemExit:
+        return 1
+    try:
+        return _run_inner(cfg)
+    except Exception as exc:
+        try:
+            cfg = require_config()
+        except SystemExit:
+            print(f"[Quality] FATAL: {exc}", file=sys.stderr)
+            return 1
+        log(cfg, MODULE, "ERROR", f"质量检测未捕获异常: {exc}")
+        log(cfg, MODULE, "ERROR", traceback.format_exc().strip()[:800])
+        _tg_post(
+            cfg,
+            {
+                "parse_mode": "Markdown",
+                "text": (
+                    "❌ *IP 质量检测异常退出*\n"
+                    f"📍 节点：`{escape_markdown(cfg.get('NODE_ALIAS') or cfg.get('NODE_NAME', '?'))}`\n"
+                    f"⚠️ `{escape_markdown(str(exc)[:120])}`"
+                ),
+            },
+        )
+        log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (异常) ==========")
+        return 1
 
 
 def main() -> None:
