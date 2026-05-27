@@ -16,27 +16,34 @@ from tg_util import build_svq_callback, escape_markdown, tg_post
 MODULE = "Quality"
 
 _ISO_CC_RE = re.compile(r"^[A-Z]{2}$")
+# 语言码（非 ISO 国家），Netflix 页面常见 zh → 误显示为 ZH
+_NON_COUNTRY_ISO = frozenset({"ZH", "EN"})
+
+
+def _valid_iso(cc: str) -> str:
+    c = (cc or "").strip().upper()
+    if _ISO_CC_RE.match(c) and c not in _NON_COUNTRY_ISO:
+        return c
+    return ""
 
 
 def _resolve_media_iso(data: dict, key: str) -> str:
     """从探针结果解析 ISO 3166-1 alpha-2 国家码."""
     media = data.get("Media", {}).get(key, {})
     status = media.get("Status", "")
-    reg = (media.get("Region") or "").strip().upper()
-    if reg in ("中国", "CHINA"):
-        return "CN"
-    if _ISO_CC_RE.match(reg):
+    reg = _valid_iso(media.get("Region") or "")
+    if reg:
         return reg
     if status == "中国":
         return "CN"
     g = data.get("GoogleGeo", {})
-    if key == "Youtube" and g.get("premium"):
-        cc = str(g["premium"]).upper()
-        if _ISO_CC_RE.match(cc):
-            return cc
-    if key in ("Youtube", "TikTok") and g.get("ipCountry"):
-        cc = str(g["ipCountry"]).upper()
-        if _ISO_CC_RE.match(cc):
+    for src in (
+        g.get("premium") if key == "Youtube" else "",
+        g.get("music") if key == "Youtube" else "",
+        g.get("ipCountry"),
+    ):
+        cc = _valid_iso(str(src or ""))
+        if cc:
             return cc
     return "--"
 
@@ -97,7 +104,19 @@ def _tg_post(cfg: dict, payload: dict) -> bool:
 def _format_score_label(name: str, val: str) -> str:
     if val == "N/A":
         return f"• **{name}:** `N/A`"
+    if name == "IPAPI 风险率" or str(val).endswith("%"):
+        return f"• **{name}:** `{escape_markdown(val)}`"
     return f"• **{name}:** `{escape_markdown(val)}/100`"
+
+
+def _scores_footnote(scam: str, abuse: str, ipqs: str, ip2l: str, fraud: str) -> str:
+    core = (scam, abuse, ipqs, ip2l)
+    ok = sum(1 for v in core if v != "N/A")
+    if ok == 0:
+        return "\n_⚠️ 风险数据库均未返回有效分数（出站可能被限或 API 不可用）。_"
+    if ok <= 2:
+        return "\n_⚠️ 部分风险库未返回数据，仅供参考。_"
+    return ""
 
 
 def _port25_label(mail: dict) -> str:
@@ -181,16 +200,17 @@ def _run_inner(cfg: dict) -> int:
             _format_score_label("AbuseIPDB", str(abuse)),
             _format_score_label("IPQS", str(ipqs)),
             _format_score_label("IP2Location", str(ip2l)),
-            f"• **IPAPI 风险率:** `{escape_markdown(fraud)}`",
+            _format_score_label("IPAPI 风险率", str(fraud)),
         ]
     )
+    score_note = _scores_footnote(str(scam), str(abuse), str(ipqs), str(ip2l), str(fraud))
 
     report = f"""🎯 *IP-Sentinel IP 质量报告*
 📍 节点：`{safe_alias}`
 🌐 地址：`{safe_ip}`{warning}
 
 *🛡️ 风险评分 (越低越好)*
-{score_lines}
+{score_lines}{score_note}
 
 *🎬 核心业务解锁* _(ISO 3166-1)_
 • **YouTube:** {yt}

@@ -19,13 +19,54 @@ _IP_API_FIELDS = (
     "status,message,query,country,countryCode,regionName,city,isp,org,as,mobile,proxy,hosting"
 )
 
-# xykt MediaUnlockTest_YouTube_Premium 同款 Cookie（CONSENT + GPS）
-_YT_PREMIUM_COOKIE = (
-    "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; "
-    "VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai"
-)
 
 _NETFLIX_TITLES = ("81280792", "70143836")
+
+_ISO_CC_RE = re.compile(r"^[A-Z]{2}$")
+# 非 ISO 3166-1 国家码（常见于 Netflix 语言/字幕 id，如 zh）
+_NON_COUNTRY_ISO = frozenset({"ZH", "EN", "ZH-HANS", "ZH-HANT"})
+
+_COUNTRY_NAME_TO_ISO = {
+    "TAIWAN": "TW",
+    "HONG KONG": "HK",
+    "MACAO": "MO",
+    "MACAU": "MO",
+    "SINGAPORE": "SG",
+    "JAPAN": "JP",
+    "UNITED STATES": "US",
+    "UNITED KINGDOM": "GB",
+    "SOUTH KOREA": "KR",
+    "KOREA": "KR",
+}
+
+_YT_COOKIE_BASE = (
+    "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; "
+    "VISITOR_INFO1_LIVE=4VwPMkB7W5A"
+)
+
+_YT_TZ_BY_REGION = {
+    "TW": "Asia.Taipei",
+    "HK": "Asia.Hong_Kong",
+    "MO": "Asia.Macau",
+    "JP": "Asia.Tokyo",
+    "KR": "Asia.Seoul",
+    "SG": "Asia.Singapore",
+    "US": "America.New_York",
+    "GB": "Europe.London",
+    "AU": "Australia.Sydney",
+}
+
+
+def normalize_country_iso(code: str) -> str:
+    cc = (code or "").strip().upper()
+    if not _ISO_CC_RE.match(cc) or cc in _NON_COUNTRY_ISO:
+        return ""
+    return cc
+
+
+def _country_name_to_iso(name: str) -> str:
+    key = (name or "").strip().upper()
+    return _COUNTRY_NAME_TO_ISO.get(key, "")
 
 
 def _log(log_fn: LogFn | None, level: str, msg: str) -> None:
@@ -76,28 +117,92 @@ def _asn_number(as_field: str) -> str:
     return m.group(1) if m else ""
 
 
-def _fetch_scamalytics_score(ip: str, ctx: CurlContext) -> str:
-    raw = fetch_text(f"https://ipinfo.check.place/{ip}?db=scamalytics", ctx, timeout=12)
-    if raw:
-        try:
-            data = json.loads(raw)
-            score = data.get("scamalytics", {}).get("scamalytics_score")
-            if score is not None and str(score) not in ("", "null"):
-                return str(int(float(score)))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
-    html = fetch_text(f"https://scamalytics.com/ip/{ip}", ctx, ua=DEFAULT_UA, timeout=20)
-    if not html:
+def _score_int(val: Any) -> str:
+    if val is None or str(val).strip().lower() in ("", "null", "none"):
         return "N/A"
-    for pat in (
-        r"Fraud Score:\s*(\d{1,3})",
-        r"fraud-score[^>]*>\s*(\d{1,3})",
-        r"score[\"']?\s*[:>]\s*(\d{1,3})",
-    ):
-        m = re.search(pat, html, re.I)
-        if m:
-            return m.group(1)
+    try:
+        n = int(float(val))
+        if 0 <= n <= 100:
+            return str(n)
+    except (TypeError, ValueError):
+        pass
     return "N/A"
+
+
+def _fetch_checkplace(ip: str, ctx: CurlContext, db: str) -> dict[str, Any] | None:
+    raw = fetch_text(f"https://ipinfo.check.place/{ip}?db={db}", ctx, timeout=14)
+    if not raw or not raw.lstrip().startswith("{"):
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _fetch_ipapi_is_risk(ip: str, ctx: CurlContext) -> str:
+    raw = fetch_text(f"https://api.ipapi.is/?q={ip}", ctx, timeout=12)
+    if not raw:
+        return "N/A"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "N/A"
+    scoretext = (data.get("company") or {}).get("abuser_score") or ""
+    m = re.match(r"([\d.]+)", str(scoretext))
+    if not m:
+        return "N/A"
+    try:
+        pct = float(m.group(1)) * 100
+        return f"{pct:.1f}%"
+    except ValueError:
+        return "N/A"
+
+
+def _fetch_risk_scores(ip: str, ctx: CurlContext, log_fn: LogFn | None = None) -> dict[str, str]:
+    """多库风险分（对齐 xykt / ipinfo.check.place）."""
+    scores: dict[str, str] = {
+        "SCAMALYTICS": "N/A",
+        "AbuseIPDB": "N/A",
+        "IPQS": "N/A",
+        "IP2LOCATION": "N/A",
+        "ipapi": "N/A",
+    }
+
+    scam_data = _fetch_checkplace(ip, ctx, "scamalytics")
+    if scam_data and "scamalytics" in scam_data:
+        scores["SCAMALYTICS"] = _score_int(
+            (scam_data.get("scamalytics") or {}).get("scamalytics_score")
+        )
+
+    abuse_data = _fetch_checkplace(ip, ctx, "abuseipdb")
+    if abuse_data:
+        scores["AbuseIPDB"] = _score_int((abuse_data.get("data") or {}).get("abuseConfidenceScore"))
+
+    ipqs_data = _fetch_checkplace(ip, ctx, "ipqualityscore")
+    if ipqs_data:
+        scores["IPQS"] = _score_int(ipqs_data.get("fraud_score"))
+
+    ip2l_data = _fetch_checkplace(ip, ctx, "ip2location")
+    if ip2l_data:
+        scores["IP2LOCATION"] = _score_int(ip2l_data.get("fraud_score"))
+
+    scores["ipapi"] = _fetch_ipapi_is_risk(ip, ctx)
+
+    if scam_data is None and abuse_data is None:
+        _log(log_fn, "WARN ", "ipinfo.check.place 无响应，尝试 Scamalytics 网页回退…")
+        html = fetch_text(f"https://scamalytics.com/ip/{ip}", ctx, ua=DEFAULT_UA, timeout=20)
+        for pat in (
+            r"Fraud Score:\s*(\d{1,3})",
+            r"fraud-score[^>]*>\s*(\d{1,3})",
+        ):
+            m = re.search(pat, html or "", re.I)
+            if m:
+                scores["SCAMALYTICS"] = m.group(1)
+                break
+
+    ok = sum(1 for v in scores.values() if v != "N/A")
+    _log(log_fn, "INFO ", f"Python 探针: 风险库返回 {ok}/5 项有效分数")
+    return scores
 
 
 def _check_port25(cfg: dict[str, Any]) -> bool | None:
@@ -136,23 +241,41 @@ def _media_block(msg: str = "屏蔽") -> dict[str, str]:
     return {"Status": msg, "Region": "", "Type": ""}
 
 
-def _probe_youtube(ctx: CurlContext, ua: str) -> tuple[dict[str, str], str]:
+def _yt_premium_cookie(region_code: str) -> str:
+    cc = normalize_country_iso(region_code)
+    tz = _YT_TZ_BY_REGION.get(cc, "")
+    if tz:
+        return f"{_YT_COOKIE_BASE}; PREF=tz={tz}"
+    return _YT_COOKIE_BASE
+
+
+def _probe_youtube(
+    ctx: CurlContext, ua: str, *, region_code: str = "", ip_cc: str = ""
+) -> tuple[dict[str, str], str]:
     """返回 (media结果, premium_gl). 逻辑对齐 xykt MediaUnlockTest_YouTube_Premium."""
     html = fetch_text(
         "https://www.youtube.com/premium",
         ctx,
         ua=ua,
         timeout=15,
-        cookie=_YT_PREMIUM_COOKIE,
+        cookie=_yt_premium_cookie(region_code or ip_cc),
         extra_headers=["Accept-Language: en"],
     )
     if not html:
         return _media_block("失败"), ""
 
-    if re.search(r"www\.google\.cn", html):
+    region = parse_yt_premium_gl(html)
+    hard_cn = bool(re.search(r"https?://(?:www\.)?google\.cn", html, re.I))
+
+    if hard_cn:
         return _media_block("中国"), "CN"
 
-    region = parse_yt_premium_gl(html)
+    if region == "CN" and ip_cc in ("TW", "HK", "MO"):
+        if "ad-free" in html:
+            region = ip_cc
+        else:
+            return _media_partial("待确认", ip_cc), ip_cc
+
     if region == "CN":
         return _media_block("中国"), "CN"
 
@@ -161,6 +284,8 @@ def _probe_youtube(ctx: CurlContext, ua: str) -> tuple[dict[str, str], str]:
 
     if "ad-free" in html and region:
         return _media_unlock(region, "Premium"), region
+    if "ad-free" in html and ip_cc:
+        return _media_unlock(ip_cc, "Premium"), ip_cc
     if "ad-free" in html:
         return _media_unlock("", "Premium"), region or ""
 
@@ -174,12 +299,26 @@ def _probe_youtube_music_gl(ctx: CurlContext, ua: str) -> str:
     return parse_yt_music_gl(html)
 
 
-def _netflix_region_from_body(body: str) -> str:
-    m = re.search(r'"id":"([^"]+)".*?"countryName":"[^"]*"', body)
-    return m.group(1).upper() if m else ""
+def _netflix_region_from_body(body: str, fallback_cc: str = "") -> str:
+    for pat in (
+        r'"countryCode"\s*:\s*"([A-Za-z]{2})"',
+        r'"requestCountry"\s*:\s*"([A-Za-z]{2})"',
+        r'"currentCountry"\s*:\s*"([A-Za-z]{2})"',
+        r'"country"\s*:\s*"([A-Za-z]{2})"',
+    ):
+        for m in re.finditer(pat, body, re.I):
+            cc = normalize_country_iso(m.group(1))
+            if cc:
+                return cc
+    m = re.search(r'"countryName"\s*:\s*"([^"]+)"', body, re.I)
+    if m:
+        cc = _country_name_to_iso(m.group(1))
+        if cc:
+            return cc
+    return normalize_country_iso(fallback_cc)
 
 
-def _probe_netflix(ctx: CurlContext, ua: str) -> dict[str, str]:
+def _probe_netflix(ctx: CurlContext, ua: str, *, ip_cc: str = "") -> dict[str, str]:
     """对齐 xykt：检测固定 title 页，而非首页文案."""
     bodies: list[str] = []
     for tid in _NETFLIX_TITLES:
@@ -196,7 +335,7 @@ def _probe_netflix(ctx: CurlContext, ua: str) -> dict[str, str]:
     if not all(bodies):
         return _media_block("探测失败")
 
-    region = _netflix_region_from_body(bodies[0]) or _netflix_region_from_body(bodies[1])
+    region = _netflix_region_from_body(bodies[0], ip_cc) or _netflix_region_from_body(bodies[1], ip_cc)
     oh_no = [("Oh no!" in b) for b in bodies]
 
     if all(oh_no):
@@ -226,13 +365,13 @@ def _probe_chatgpt(ctx: CurlContext, ua: str) -> dict[str, str]:
     return _media_partial("待确认", "")
 
 
-def _probe_tiktok(ctx: CurlContext, ua: str) -> dict[str, str]:
+def _probe_tiktok(ctx: CurlContext, ua: str, *, ip_cc: str = "") -> dict[str, str]:
     body = fetch_text("https://www.tiktok.com/", ctx, ua=ua, timeout=15)
     if not body:
         return _media_block("探测失败")
     if "tiktok" in body.lower():
-        return _media_unlock("", "")
-    return _media_partial("待确认", "")
+        return _media_unlock(ip_cc or "", "")
+    return _media_partial("待确认", ip_cc)
 
 
 def _probe_disney(ctx: CurlContext, ua: str) -> dict[str, str]:
@@ -256,9 +395,37 @@ def _probe_prime(ctx: CurlContext, ua: str) -> dict[str, str]:
     return _media_partial("待确认", "")
 
 
+def _reconcile_youtube_cn(
+    media: dict[str, dict[str, str]],
+    google_geo: dict[str, str],
+    ip_cc: str,
+) -> None:
+    """IP 归属 TW/HK/MO 时，避免单探针 CN 误报."""
+    if ip_cc not in ("TW", "HK", "MO"):
+        return
+    yt = media.get("Youtube", {})
+    if yt.get("Status") != "中国" and google_geo.get("premium") != "CN":
+        return
+    votes = [
+        normalize_country_iso(google_geo.get("premium", "")),
+        normalize_country_iso(google_geo.get("music", "")),
+        normalize_country_iso(google_geo.get("jump", "")),
+        ip_cc,
+    ]
+    votes = [v for v in votes if v]
+    cn_n = sum(1 for v in votes if v == "CN")
+    if cn_n >= 2:
+        return
+    media["Youtube"] = _media_unlock(ip_cc, "Premium")
+    google_geo["premium"] = ip_cc
+
+
 def _run_media_probes(
     ctx: CurlContext,
     ua: str,
+    *,
+    ip_cc: str = "",
+    region_code: str = "",
 ) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     media: dict[str, dict[str, str]] = {}
     google_geo: dict[str, str] = {}
@@ -266,14 +433,14 @@ def _run_media_probes(
     jump_hdr = fetch_headers("http://www.google.com/", ctx, timeout=10)
     google_geo["jump"] = parse_jump_gl(jump_hdr)
 
-    yt_media, yt_gl = _probe_youtube(ctx, ua)
+    yt_media, yt_gl = _probe_youtube(ctx, ua, region_code=region_code, ip_cc=ip_cc)
     media["Youtube"] = yt_media
     google_geo["premium"] = yt_gl
 
     tasks = {
-        "Netflix": lambda: _probe_netflix(ctx, ua),
+        "Netflix": lambda: _probe_netflix(ctx, ua, ip_cc=ip_cc),
         "ChatGPT": lambda: _probe_chatgpt(ctx, ua),
-        "TikTok": lambda: _probe_tiktok(ctx, ua),
+        "TikTok": lambda: _probe_tiktok(ctx, ua, ip_cc=ip_cc),
         "DisneyPlus": lambda: _probe_disney(ctx, ua),
         "AmazonPrimeVideo": lambda: _probe_prime(ctx, ua),
     }
@@ -287,6 +454,7 @@ def _run_media_probes(
                 media[name] = _media_block("探测异常")
 
     google_geo["music"] = _probe_youtube_music_gl(ctx, ua)
+    _reconcile_youtube_cn(media, google_geo, ip_cc)
     return media, google_geo
 
 
@@ -330,11 +498,13 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
 
     usage = "机房" if hosting else ("移动" if mobile else "家庭宽带")
 
-    _log(log_fn, "INFO ", "Python 探针: Scamalytics 风险分…")
-    scam = _fetch_scamalytics_score(ip, ctx)
+    region_code = (cfg.get("REGION_CODE") or ip_cc or "").upper()
+
+    _log(log_fn, "INFO ", "Python 探针: 多库风险评分…")
+    score_map = _fetch_risk_scores(ip, ctx, log_fn)
 
     _log(log_fn, "INFO ", "Python 探针: Google 三核 + 流媒体（并行）…")
-    media, google_geo = _run_media_probes(ctx, ua)
+    media, google_geo = _run_media_probes(ctx, ua, ip_cc=ip_cc, region_code=region_code)
     google_geo["ipCountry"] = ip_cc
 
     port25 = _check_port25(cfg)
@@ -349,13 +519,7 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
             "Type": ip_type,
         },
         "Type": {"Usage": {"IPinfo": usage}},
-        "Score": {
-            "SCAMALYTICS": scam,
-            "AbuseIPDB": "N/A",
-            "IPQS": "N/A",
-            "IP2LOCATION": "N/A",
-            "ipapi": "N/A",
-        },
+        "Score": score_map,
         "Factor": {
             "Proxy": {"ip-api": proxy, "hosting": hosting},
             "VPN": {"ip-api": proxy},
