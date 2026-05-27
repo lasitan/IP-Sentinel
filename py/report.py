@@ -39,20 +39,38 @@ FLAGS = {
 
 
 _MAPS_GEO_DONE_RE = re.compile(r"\[MAPS_GEO\].*访问完成")
+_EARTH_GEO_DONE_RE = re.compile(r"\[EARTH_GEO\].*访问完成")
 _MAPS_GEO_SESSION_RE = re.compile(r"本次会话 Maps 虚拟定位访问:\s*(\d+)\s*次")
+_EARTH_GEO_SESSION_RE = re.compile(r"本次会话 Earth 虚拟定位访问:\s*(\d+)\s*次")
 
 
-def _count_maps_geo_visits(google_lines: list[str]) -> int:
-    """统计 24h 内 Maps Chromium 虚拟定位成功次数。"""
-    per_visit = sum(1 for ln in google_lines if _MAPS_GEO_DONE_RE.search(ln))
+def _count_tagged_geo_visits(
+    google_lines: list[str],
+    *,
+    done_re: re.Pattern[str],
+    session_re: re.Pattern[str],
+) -> int:
+    per_visit = sum(1 for ln in google_lines if done_re.search(ln))
     if per_visit:
         return per_visit
     session_total = 0
     for ln in google_lines:
-        m = _MAPS_GEO_SESSION_RE.search(ln)
+        m = session_re.search(ln)
         if m:
             session_total += int(m.group(1))
     return session_total
+
+
+def _count_maps_geo_visits(google_lines: list[str]) -> int:
+    return _count_tagged_geo_visits(
+        google_lines, done_re=_MAPS_GEO_DONE_RE, session_re=_MAPS_GEO_SESSION_RE
+    )
+
+
+def _count_earth_geo_visits(google_lines: list[str]) -> int:
+    return _count_tagged_geo_visits(
+        google_lines, done_re=_EARTH_GEO_DONE_RE, session_re=_EARTH_GEO_SESSION_RE
+    )
 
 
 def _node_name(cfg: dict) -> str:
@@ -228,12 +246,13 @@ def run() -> int:
             g_fail = sum(1 for ln in g_logs if "❌" in ln)
             g_warn = sum(1 for ln in g_logs if "⚠️" in ln)
             g_maps_geo = _count_maps_geo_visits(g_logs)
+            g_earth_geo = _count_earth_geo_visits(g_logs)
             rate = f"{(g_ok / g_total * 100):.1f}" if g_total else "0.0"
             msg += (
                 f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
                 f"🚀 执行总数: {g_total} 次 (胜率: **{rate}%**)\n"
                 f"✅ 成功: {g_ok} | ❌ CN 判定: {g_fail} | ⚠️ 警告: {g_warn}\n"
-                f"📍 虚拟定位 (Maps Chromium): **{g_maps_geo}** 次"
+                f"📍 虚拟定位 Maps: **{g_maps_geo}** 次 | Earth: **{g_earth_geo}** 次"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":

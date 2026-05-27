@@ -17,7 +17,12 @@ from geo_probe import (
     target_country_code,
 )
 from log_util import log
-from maps_browser import maps_geo_enabled, parse_lang_locale, visit_google_maps
+from maps_browser import (
+    maps_geo_enabled,
+    parse_lang_locale,
+    visit_google_earth,
+    visit_google_maps,
+)
 from network import build_curl_context, fetch_headers, fetch_text, http_status
 from persona import load_lines, pick_session_ua, random_coord, uri_encode_keyword
 
@@ -51,6 +56,7 @@ def run(cfg: dict | None = None) -> int:
     maps_geo_mode = maps_geo_enabled(cfg)
     maps_locale = parse_lang_locale(lang)
     maps_geo_visits = 0
+    earth_geo_visits = 0
 
     log(cfg, MODULE, "INFO ", f"当前出网 IP: {current_ip}")
     log(cfg, MODULE, "INFO ", f"设备指纹锁定: {session_ua[:45]}...")
@@ -66,12 +72,38 @@ def run(cfg: dict | None = None) -> int:
 
     ctx = build_curl_context(cfg, _log)
 
+    def _run_earth_geo(lat: float, lon: float, phase: str) -> int:
+        nonlocal earth_geo_visits
+        if maps_geo_mode not in ("true", "auto"):
+            return 0
+        log(
+            cfg,
+            MODULE,
+            "INFO ",
+            f"Earth 动作 ({phase}) | 会话虚拟坐标: {lat}, {lon}",
+        )
+        result = visit_google_earth(
+            latitude=lat,
+            longitude=lon,
+            user_agent=session_ua,
+            locale=maps_locale,
+            log=_log,
+        )
+        if result == "ok":
+            earth_geo_visits += 1
+            return 200
+        log(cfg, MODULE, "WARN ", f"Earth 浏览器访问失败 ({result})")
+        return 0
+
+    if maps_geo_mode in ("true", "auto"):
+        _run_earth_geo(session_lat, session_lon, "会话锚定")
+
     for i in range(1, total_actions + 1):
         action_lat = random_coord(session_lat, 1)
         action_lon = random_coord(session_lon, 1)
         keyword = random.choice(keywords)
         encoded = uri_encode_keyword(keyword)
-        action_type = random.randint(1, 4)
+        action_type = random.randint(1, 5)
         log(
             cfg,
             MODULE,
@@ -117,6 +149,9 @@ def run(cfg: dict | None = None) -> int:
                     log(cfg, MODULE, "ERROR", f"Maps 浏览器定位失败 ({geo_result})，已跳过 HTTP 回退。")
                 else:
                     code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
+        elif action_type == 5:
+            url = "https://earth.google.com/"
+            code = _run_earth_geo(session_lat, session_lon, f"探索地球 [{i}/{total_actions}]")
         else:
             url = "https://connectivitycheck.gstatic.com/generate_204"
             code = http_status(url, ctx, ua=session_ua, follow=False, timeout=10)
@@ -149,6 +184,7 @@ def run(cfg: dict | None = None) -> int:
 
     log(cfg, MODULE, "SCORE", f"自检结论: {status}")
     log(cfg, MODULE, "INFO ", f"本次会话 Maps 虚拟定位访问: {maps_geo_visits} 次")
+    log(cfg, MODULE, "INFO ", f"本次会话 Earth 虚拟定位访问: {earth_geo_visits} 次")
     log(cfg, MODULE, "END  ", "========== 会话结束，释放进程 ==========")
     return 0
 
