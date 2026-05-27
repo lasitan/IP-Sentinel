@@ -1,4 +1,4 @@
-"""原生 Python IP 质量探针（流媒体解锁对齐 Clash Verge / verge-mihomo）."""
+"""原生 Python IP 质量探针（YouTube/Netflix 对齐 lmc999 RegionRestrictionCheck）."""
 
 from __future__ import annotations
 
@@ -38,22 +38,55 @@ _ISO3_TO_ISO2 = {
     "FRA": "FR",
 }
 
-_YT_REGION_PATTERNS = (
-    r'id=["\']country-code["\'][^>]*>\s*([A-Za-z]{2,3})\s*<',
-    r'"GL"\s*:\s*"([A-Za-z]{2})"',
-    r'"countryCode"\s*:\s*"([A-Za-z]{2})"',
-    r'"country_code"\s*:\s*"([A-Za-z]{2})"',
-)
-
 _GEMINI_BLOCKED = frozenset({"CHN", "RUS", "BLR", "CUB", "IRN", "PRK", "SYR", "HKG", "MAC"})
 _GEMINI_REGION_MARKER = ',2,1,200,"'
 
 _CLAUDE_BLOCKED = frozenset({"AF", "BY", "CN", "CU", "HK", "IR", "KP", "MO", "RU", "SY"})
 
-_NETFLIX_FAST_URL = (
-    "https://api.fast.com/netflix/speedtest/v2"
-    "?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5"
+# lmc999/RegionRestrictionCheck — MediaUnlockTest_Netflix
+_NETFLIX_COOKIE = (
+    "flwssn=d2c72c47-49e9-48da-b7a2-2dc6d7ca9fcf; "
+    "nfvdid=BQFmAAEBEMZa4XMYVzVGf9-kQ1HXumtAKsCyuBZU4QStC6CGEGIVznjNuuTerLAG8v2-9V_kYhg5uxTB5_yyrmqc02U5l1Ts74Qquezc9AE-LZKTo3kY3g%3D%3D; "
+    "SecureNetflixId=v%3D3%26mac%3DAQEAEQABABSQHKcR1d0sLV0WTu0lL-BO63TKCCHAkeY.%26dt%3D1745376277212; "
+    "NetflixId=v%3D3%26ct%3DBgjHlOvcAxLAAZuNS4_CJHy9NKJPzUV-9gElzTlTsmDS1B59TycR-fue7f6q7X9JQAOLttD7OnlldUtnYWXL7VUfu9q4pA0gruZKVIhScTYI1GKbyiEqKaULAXOt0PHQzgRLVTNVoXkxcbu7MYG4wm1870fZkd5qrDOEseZv2WIVk4xIeNL87EZh1vS3RZU3e-qWy2tSmfSNUC-FVDGwxbI6-hk3Zg2MbcWYd70-ghohcCSZp5WHAGXg_xWVC7FHM3aOUVTGwRCU1RgGIg4KDKGr_wsTRRw6HWKqeA..; "
+    "gsid=09bb180e-fbb1-4bf6-adcb-a3fa1236e323; "
+    "OptanonConsent=isGpcEnabled=0&datestamp=Wed+Apr+23+2025+10%3A47%3A11+GMT%2B0800+(%E4%B8%AD%E5%9B%BD%E6%A0%87%E5%87%86%E6%97%B6%E9%97%B4)&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=f13f841e-c75d-4f95-ab04-d8f581cac53e&interactionCount=0&isAnonUser=1&landingPath=https%3A%2F%2Fwww.netflix.com%2Fsg-zh%2Ftitle%2F81280792&groups=C0001%3A1%2CC0002%3A1%2CC0003%3A1%2CC0004%3A1"
 )
+_NETFLIX_HTML_HEADERS = [
+    "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language: en-US,en;q=0.9",
+]
+_NETFLIX_REGION_RE = re.compile(
+    r'"id":"([^"]+)".*?"countryName":"[^"]*"',
+    re.DOTALL,
+)
+_YT_CDN_URL = "https://redirector.googlevideo.com/report_mapping"
+_IATA_CODE_URLS = (
+    "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode.txt",
+    "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode2.txt",
+)
+_IATA_ISO: dict[str, str] = {
+    "TPE": "TW",
+    "HKG": "HK",
+    "SIN": "SG",
+    "NRT": "JP",
+    "HND": "JP",
+    "KIX": "JP",
+    "ICN": "KR",
+    "LAX": "US",
+    "SJC": "US",
+    "SEA": "US",
+    "ORD": "US",
+    "IAD": "US",
+    "LHR": "GB",
+    "FRA": "DE",
+    "SYD": "AU",
+    "BKK": "TH",
+    "KUL": "MY",
+    "MNL": "PH",
+    "CGK": "ID",
+}
+_IATA_LOADED = False
 
 
 def normalize_country_iso(code: str) -> str:
@@ -255,96 +288,120 @@ def _unlock_result(cv_status: str, region: str = "", detail: str = "") -> dict[s
     }
 
 
-def _extract_yt_region(body: str) -> str:
-    for pat in _YT_REGION_PATTERNS:
-        m = re.search(pat, body, re.I)
-        if m:
-            cc = region_label(m.group(1))
-            if cc:
-                return cc
+def _merge_iata_entry(iata: str, *, location: str = "", iso: str = "") -> None:
+    code = (iata or "").strip().upper()
+    if len(code) != 3 or not code.isalpha():
+        return
+    cc = region_label(iso)
+    if cc:
+        _IATA_ISO[code] = cc
+
+
+def _parse_iata_reference(text: str) -> None:
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) >= 2 and len(parts[1]) == 3:
+                _merge_iata_entry(parts[1], iso=parts[2] if len(parts) > 2 else "")
+            continue
+        if "," in line:
+            parts = [p.strip() for p in line.split(",")]
+            for idx, part in enumerate(parts):
+                if len(part) == 3 and part.isalpha():
+                    iso_hint = parts[idx + 1] if idx + 1 < len(parts) else ""
+                    _merge_iata_entry(part, iso=iso_hint)
+                    break
+
+
+def _load_iata_maps(ctx: CurlContext) -> None:
+    global _IATA_LOADED
+    if _IATA_LOADED:
+        return
+    _IATA_LOADED = True
+    for url in _IATA_CODE_URLS:
+        body = fetch_text(url, ctx, timeout=15)
+        if body:
+            _parse_iata_reference(body)
+
+
+def _iata_to_iso(iata: str) -> str:
+    return _IATA_ISO.get((iata or "").upper(), "")
+
+
+def _yt_cdn_iata(report: str) -> str:
+    """RegionTest_YouTubeCDN：首行 => 第三列，按 - 切分取 IATA."""
+    for line in report.splitlines():
+        if "=>" not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        token = parts[2]
+        segments = token.split("-")
+        if len(segments) < 2:
+            continue
+        raw = segments[1][:3].upper()
+        if len(raw) == 3 and raw.isalpha():
+            return raw
+        break
     return ""
 
 
 def _probe_youtube_premium(ctx: CurlContext, ua: str) -> dict[str, str]:
-    url = "https://www.youtube.com/premium?hl=en"
-    status, body, _ = fetch_http_response(url, ctx, ua=ua, follow=True, timeout=20)
+    """RegionRestrictionCheck RegionTest_YouTubeCDN（报告行仍称 YouTube Premium）."""
+    _load_iata_maps(ctx)
+    body = fetch_text(_YT_CDN_URL, ctx, ua=ua, follow=False, timeout=15)
     if not body:
         return _unlock_result("Failed")
 
-    body_lower = body.lower()
-    region = _extract_yt_region(body)
+    iata = _yt_cdn_iata(body)
+    if not iata:
+        return _unlock_result("Failed")
 
-    if (
-        "youtube premium is not available in your country" in body_lower
-        or "premium is not available in your country" in body_lower
-        or "premium is not available in your region" in body_lower
-    ):
-        return _unlock_result("No", region)
+    region = _iata_to_iso(iata)
+    if not region:
+        return _unlock_result("Failed", detail=f"IATA:{iata}")
 
-    if 200 <= status < 300 and (
-        "youtube premium" in body_lower
-        or "ad-free" in body_lower
-        or '"browseid":"spunlimited"' in body_lower
-    ):
+    is_idc = "router" in body
+    if is_idc:
         return _unlock_result("Yes", region)
+    return _unlock_result("待确认", region, detail="CDN分流")
 
-    return _unlock_result("Failed", region)
 
-
-def _netflix_fast_com(ctx: CurlContext, ua: str) -> dict[str, str] | None:
-    status, body, _ = fetch_http_response(_NETFLIX_FAST_URL, ctx, ua=ua, timeout=30)
-    if status == 403:
-        return _unlock_result("No", "", "IP Banned")
-    if not body:
-        return None
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    targets = data.get("targets")
-    if isinstance(targets, list) and targets:
-        loc = targets[0].get("location") or {}
-        country = loc.get("country")
-        if country:
-            return _unlock_result("Yes", region_label(str(country)))
-    return None
+def _netflix_title_page(ctx: CurlContext, ua: str, title_id: str) -> str:
+    url = f"https://www.netflix.com/title/{title_id}"
+    return fetch_text(
+        url,
+        ctx,
+        ua=ua,
+        cookie=_NETFLIX_COOKIE,
+        extra_headers=_NETFLIX_HTML_HEADERS,
+        fail_on_http_error=True,
+        timeout=30,
+    )
 
 
 def _probe_netflix(ctx: CurlContext, ua: str) -> dict[str, str]:
-    cdn_hit = _netflix_fast_com(ctx, ua)
-    if cdn_hit and cdn_hit.get("Status") == "解锁":
-        return cdn_hit
-
-    url1 = "https://www.netflix.com/title/81280792"
-    url2 = "https://www.netflix.com/title/70143836"
-    status1, _, _ = fetch_http_response(url1, ctx, ua=ua, follow=False, timeout=30)
-    status2, _, _ = fetch_http_response(url2, ctx, ua=ua, follow=False, timeout=30)
-
-    if status1 == 0 or status2 == 0:
+    """RegionRestrictionCheck MediaUnlockTest_Netflix."""
+    body1 = _netflix_title_page(ctx, ua, "81280792")
+    body2 = _netflix_title_page(ctx, ua, "70143836")
+    if not body1 or not body2:
         return _unlock_result("Failed")
 
-    if status1 == 404 and status2 == 404:
+    oh1 = "Oh no!" in body1
+    oh2 = "Oh no!" in body2
+    if oh1 and oh2:
         return _unlock_result("Originals Only")
 
-    if status1 == 403 or status2 == 403:
-        return _unlock_result("No")
+    if not oh1 or not oh2:
+        m = _NETFLIX_REGION_RE.search(body1)
+        region = region_label(m.group(1)) if m else ""
+        return _unlock_result("Yes", region)
 
-    if status1 in (200, 301) or status2 in (200, 301):
-        test_url = "https://www.netflix.com/title/80018499"
-        _, _, headers = fetch_http_response(
-            test_url, ctx, ua=ua, follow=False, head_only=True, timeout=30
-        )
-        location = headers.get("location", "")
-        if location:
-            parts = location.split("/")
-            if len(parts) >= 4:
-                region_code = parts[3].split("-")[0]
-                cc = region_label(region_code)
-                if cc:
-                    return _unlock_result("Yes", cc)
-        return _unlock_result("Yes", "US")
-
-    return _unlock_result("Failed", detail=f"{status1}_{status2}")
+    return _unlock_result("Failed")
 
 
 def _probe_gemini(ctx: CurlContext, ua: str) -> dict[str, str]:
@@ -525,8 +582,23 @@ def _run_media_probes(ctx: CurlContext, ua: str) -> dict[str, dict[str, str]]:
     return media
 
 
+def _probe_curl_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    """质量探针：优先 BIND_IP，否则用 PUBLIC_IP 锁定出口."""
+    out = dict(cfg)
+    if not (out.get("BIND_IP") or "").strip():
+        pub = (out.get("PUBLIC_IP") or "").strip()
+        if pub:
+            out["BIND_IP"] = pub
+    return out
+
+
 def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
-    ctx = build_curl_context(cfg, lambda lvl, msg: _log(log_fn, lvl, msg))
+    probe_cfg = _probe_curl_cfg(cfg)
+    ctx = build_curl_context(
+        probe_cfg,
+        lambda lvl, msg: _log(log_fn, lvl, msg),
+        dns="1.1.1.1",
+    )
     ua = DEFAULT_UA
 
     _log(log_fn, "INFO ", "Python 探针: 获取出口 IP…")
@@ -568,7 +640,11 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
     _log(log_fn, "INFO ", "Python 探针: 多库风险评分…")
     score_map = _fetch_risk_scores(ip, ctx, log_fn)
 
-    _log(log_fn, "INFO ", "Python 探针: 流媒体解锁（Clash Verge 逻辑，并行）…")
+    _log(
+        log_fn,
+        "INFO ",
+        "Python 探针: 流媒体解锁（RegionRestrictionCheck YT CDN / Netflix，DNS 1.1.1.1，并行）…",
+    )
     media = _run_media_probes(ctx, ua)
 
     port25 = _check_port25(cfg)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -12,6 +12,7 @@ from typing import Any
 class CurlContext:
     bind_opt: list[str]
     ip_flag: str  # "-4" or "-6"
+    dns_opt: list[str] = field(default_factory=list)
 
     @property
     def ip_version(self) -> int:
@@ -34,14 +35,20 @@ def _ip_on_interface(raw_bind_ip: str) -> bool:
         return False
 
 
-def build_curl_context(cfg: dict[str, Any], log_fn=None) -> CurlContext:
+def build_curl_context(
+    cfg: dict[str, Any],
+    log_fn=None,
+    *,
+    dns: str | None = None,
+) -> CurlContext:
     bind_ip = cfg.get("BIND_IP", "")
     ip_pref = cfg.get("IP_PREF", "4")
     ip_flag = f"-{ip_pref or '4'}"
     bind_opt: list[str] = []
+    dns_opt = ["--dns-servers", dns] if dns else []
 
     if not bind_ip or not re.match(r"^[0-9a-fA-F:.]+$", bind_ip):
-        return CurlContext(bind_opt=[], ip_flag=ip_flag)
+        return CurlContext(bind_opt=[], ip_flag=ip_flag, dns_opt=dns_opt)
 
     raw = bind_ip.strip("[]")
     if not _ip_on_interface(raw):
@@ -50,7 +57,7 @@ def build_curl_context(cfg: dict[str, Any], log_fn=None) -> CurlContext:
                 "WARN ",
                 f"检测到配置的出口 IP ({raw}) 已丢失，自动降级为系统默认路由出网！",
             )
-        return CurlContext(bind_opt=[], ip_flag=ip_flag)
+        return CurlContext(bind_opt=[], ip_flag=ip_flag, dns_opt=dns_opt)
 
     bind_opt = ["--interface", bind_ip]
     if ":" in bind_ip:
@@ -61,11 +68,13 @@ def build_curl_context(cfg: dict[str, Any], log_fn=None) -> CurlContext:
         ip_flag = "-4"
         if log_fn:
             log_fn("INFO ", f"底层路由锁定: 绑定 IPv4 出口及协议 ({bind_ip})")
-    return CurlContext(bind_opt=bind_opt, ip_flag=ip_flag)
+    if dns and log_fn:
+        log_fn("INFO ", f"DNS 解析: {dns}")
+    return CurlContext(bind_opt=bind_opt, ip_flag=ip_flag, dns_opt=dns_opt)
 
 
 def _base_cmd(ctx: CurlContext, timeout: int) -> list[str]:
-    return ["curl", *ctx.bind_opt, ctx.ip_flag, "-m", str(timeout)]
+    return ["curl", *ctx.bind_opt, *ctx.dns_opt, ctx.ip_flag, "-m", str(timeout)]
 
 
 def http_status(
