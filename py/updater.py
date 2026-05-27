@@ -81,7 +81,7 @@ def run() -> int:
             tmp_json.unlink(missing_ok=True)
             _log("WARN ", "❌ 区域规则下载失败，保留本地旧数据")
 
-    _log("INFO ", "ℹ️ IP 质量探针已内置为 Python (ip_quality_probe)，不再拉取 bash ip_probe.sh")
+    _log("INFO ", "ℹ️ 质量探针由 Python 编排 xykt/IPQuality（core/ip_probe.sh），失败时回退内置探针")
 
     log_file = Path(cfg.get("LOG_FILE", install / "logs" / "sentinel.log"))
     removed = prune_log_file(log_file, keep_days=LOG_RETENTION_DAYS)
