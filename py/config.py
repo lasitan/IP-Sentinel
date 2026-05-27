@@ -32,5 +32,13 @@ def load_config(path: str | None = None) -> dict[str, Any]:
 def require_config(path: str | None = None) -> dict[str, Any]:
     cfg = load_config(path)
     if not cfg:
+        install = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
+        log_file = f"{install}/logs/sentinel.log"
+        try:
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("[SYSTEM ] [ERROR] 配置文件丢失，子任务退出。\n")
+        except OSError:
+            pass
         raise SystemExit("配置文件丢失！退出执行。")
     return cfg

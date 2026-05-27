@@ -557,6 +557,31 @@ class MasterHandlers:
             return None
         return row[0]["agent_ip"], row[0]["agent_port"]
 
+    def _format_agent_resp(self, resp: str, node: str, action: str) -> str:
+        if resp == "FAILED":
+            return "❌ 指令下发超时或失败！为保护链路安全，已终止通信 (严禁降级为 HTTP)。"
+        if "503" in resp or "missing" in resp.lower():
+            scripts = {
+                "google": "mod_google.py",
+                "trust": "mod_trust.py",
+                "quality": "mod_quality.py",
+                "report": "report.py",
+                "run": "runner.py",
+            }
+            name = scripts.get(action, action)
+            return f"❌ 节点 `{node}` 缺少 `{name}`，请 OTA 升级。"
+        if "403" in resp:
+            return "⚠️ **拒绝执行**：该节点未在本地开启此模块，请检查安装时的配置！"
+        ok_msgs = {
+            "google": f"✅ 节点 `{node}` 回应: 📍 Google 纠偏程序启动。",
+            "run": f"✅ 节点 `{node}` 回应: 📍 立即巡逻已触发。",
+            "trust": f"✅ 节点 `{node}` 回应: 🛡️ IP 信用净化程序启动。",
+            "quality": f"✅ 节点 `{node}` 已启动 IP 质量检测，结果将异步推送。",
+            "report": f"✅ 节点 `{node}` 正在生成日报…",
+            "log": f"✅ 节点 `{node}` 正在抓取日志...",
+        }
+        return ok_msgs.get(action, f"✅ 节点 `{node}` 接收指令: {action}")
+
     def _cmd_quality(self, chat_id: str, text: str) -> None:
         parts = text.split(maxsplit=1)
         node = sanitize_node_name(parts[1]) if len(parts) > 1 else ""
@@ -574,12 +599,7 @@ class MasterHandlers:
         self.tg.send_message(chat_id, f"⏳ 正在向 `{node}` ({ip}) 下发 [quality] 指令，请稍候...")
         url = generate_signed_url(self._auth_key(chat_id), ip, port, "/trigger_quality")
         resp = call_agent(url)
-        if resp == "FAILED":
-            self.tg.send_message(chat_id, "❌ 指令下发超时或失败！请检查节点公网 IP 或防火墙端口是否放行。")
-        elif "403" in resp:
-            self.tg.send_message(chat_id, "⚠️ **拒绝执行**：该节点未在本地开启此模块，请检查安装时的配置！")
-        else:
-            self.tg.send_message(chat_id, f"✅ 节点 `{node}` 已启动 IP 质量检测，结果将异步推送。")
+        self.tg.send_message(chat_id, self._format_agent_resp(resp, node, "quality"))
 
     def _cmd_trend(self, chat_id: str, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -806,20 +826,7 @@ class MasterHandlers:
             self.tg.send_message(chat_id, wait)
         url = generate_signed_url(auth, ip, port, f"/trigger_{action}")
         resp = call_agent(url)
-        if resp == "FAILED":
-            result = "❌ 指令下发超时或失败！为保护链路安全，已终止通信 (严禁降级为 HTTP)。"
-        elif "403" in resp:
-            result = "⚠️ **拒绝执行**：该节点未在本地开启此模块，请检查安装时的配置！"
-        elif action == "google" or action == "run":
-            result = f"✅ 节点 `{node}` 回应: 📍 Google 纠偏程序启动。"
-        elif action == "trust":
-            result = f"✅ 节点 `{node}` 回应: 🛡️ IP 信用净化程序启动。"
-        elif action == "quality":
-            result = f"✅ 节点 `{node}` 已启动 IP 质量检测，结果将异步推送。"
-        elif action == "log":
-            result = f"✅ 节点 `{node}` 正在抓取日志..."
-        else:
-            result = f"✅ 节点 `{node}` 接收指令: {action}"
+        result = self._format_agent_resp(resp, node, action)
         if msg_id:
             if not self.tg.edit_message(chat_id, msg_id, result):
                 self.tg.send_message(chat_id, result, markdown=False)

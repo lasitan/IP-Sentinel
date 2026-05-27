@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import require_config
+from log_util import log
 from network import CurlContext, build_curl_context, preflight
+
+MODULE = "Quality"
 
 DEFAULT_INSTALL = "/opt/ip_sentinel"
 PROBE_URLS = (
@@ -116,40 +119,57 @@ def _parse_media(data: dict, key: str) -> str:
     return f"⚪ {status}"
 
 
-def _tg_post(api_url: str, payload: dict) -> None:
+def _tg_post(cfg: dict, payload: dict) -> bool:
+    api_url = cfg.get("TG_API_URL", "")
+    if not api_url or not cfg.get("CHAT_ID"):
+        log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法推送质量报告")
+        return False
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=10)
-    except (urllib.error.URLError, TimeoutError, OSError):
-        pass
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode(errors="ignore")
+            if '"ok":true' in body:
+                log(cfg, MODULE, "INFO ", "质量报告已推送至 Telegram")
+                return True
+            log(cfg, MODULE, "WARN ", f"Telegram 返回异常: {body[:200]}")
+            return False
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        log(cfg, MODULE, "ERROR", f"Telegram 推送失败: {exc}")
+        return False
 
 
 def run() -> int:
     cfg = require_config()
+    node_alias = cfg.get("NODE_ALIAS") or cfg.get("NODE_NAME", "未知")
+    log(cfg, MODULE, "START", f"========== IP 质量检测启动 [节点: {node_alias}] ==========")
+
     probe_path = _probe_path(cfg)
     if not _ensure_probe(cfg):
+        log(cfg, MODULE, "ERROR", "ip_probe.sh 下载或校验失败")
         _tg_post(
-            cfg.get("TG_API_URL", ""),
+            cfg,
             {
                 "chat_id": cfg["CHAT_ID"],
                 "parse_mode": "Markdown",
                 "text": (
                     "❌ *IP 质量检测失败*\n"
-                    f"📍 节点：`{cfg.get('NODE_ALIAS', '未知')}`\n"
+                    f"📍 节点：`{node_alias}`\n"
                     "⚠️ 探针脚本下载失败。"
                 ),
             },
         )
+        log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (探针不可用) ==========")
         return 1
 
     args = _probe_args(cfg)
+    log(cfg, MODULE, "INFO ", f"执行探针: bash ip_probe.sh {' '.join(args)}")
     data = _run_probe(probe_path, args)
-    node_alias = cfg.get("NODE_ALIAS") or cfg.get("NODE_NAME", "未知")
 
     if not data or not data.get("Head", {}).get("IP"):
+        log(cfg, MODULE, "ERROR", "探针未返回有效 JSON（超时或解析失败）")
         _tg_post(
-            cfg.get("TG_API_URL", ""),
+            cfg,
             {
                 "chat_id": cfg["CHAT_ID"],
                 "parse_mode": "Markdown",
@@ -161,6 +181,7 @@ def run() -> int:
                 ),
             },
         )
+        log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (无有效结果) ==========")
         return 1
 
     info = data.get("Info", {})
@@ -268,7 +289,11 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
             ]
         },
     }
-    _tg_post(cfg.get("TG_API_URL", ""), payload)
+    if _tg_post(cfg, payload):
+        log(cfg, MODULE, "SCORE", f"检测完成 IP={ip_addr}")
+    else:
+        log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")
+    log(cfg, MODULE, "END  ", "========== IP 质量检测结束 ==========")
     return 0
 
 

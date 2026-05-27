@@ -673,7 +673,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o
 
 TMP_PY="${SECURE_TMP}/py_update"
 mkdir -p "$TMP_PY"
-PY_FILES="__init__.py config.py log_util.py network.py persona.py geo_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
+PY_FILES="__init__.py config.py log_util.py agent_spawn.py network.py persona.py geo_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
 for PY_FILE in $PY_FILES; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/${PY_FILE}" -o "${TMP_PY}/${PY_FILE}"
 done

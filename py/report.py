@@ -15,9 +15,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from log_util import load_log_lines_within_hours
-
 from config import load_config
+from log_util import load_log_lines_within_hours, log
+
+MODULE = "Report"
 from network import build_curl_context
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
@@ -149,7 +150,11 @@ def _remote_agent_version() -> str:
     return ""
 
 
-def _send_telegram(api_url: str, payload: dict) -> bool:
+def _send_telegram(cfg: dict, payload: dict) -> bool:
+    api_url = cfg.get("TG_API_URL", "")
+    if not api_url or not cfg.get("CHAT_ID"):
+        log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法发送报告")
+        return False
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         api_url,
@@ -158,10 +163,14 @@ def _send_telegram(api_url: str, payload: dict) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read().decode()
-            return '"ok":true' in body
-    except (urllib.error.URLError, TimeoutError, OSError):
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode(errors="ignore")
+            if '"ok":true' in body:
+                return True
+            log(cfg, MODULE, "WARN ", f"Telegram 返回异常: {body[:200]}")
+            return False
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        log(cfg, MODULE, "ERROR", f"Telegram 发送失败: {exc}")
         return False
 
 
@@ -169,8 +178,9 @@ def run() -> int:
     cfg = load_config()
     if not cfg:
         return 1
+    log(cfg, MODULE, "START", "========== 生成 Telegram 日报 ==========")
     if not cfg.get("TG_TOKEN") or not cfg.get("CHAT_ID"):
-        print("⚠️ 未配置 Telegram 机器人参数，取消播报。")
+        log(cfg, MODULE, "WARN ", "未配置 Telegram 机器人参数，取消播报")
         return 0
 
     install = cfg["INSTALL_DIR"]
@@ -308,14 +318,12 @@ def run() -> int:
         },
     }
 
-    ok = _send_telegram(cfg.get("TG_API_URL", ""), payload)
-    err_log = Path(install) / "logs" / "error.log"
+    ok = _send_telegram(cfg, payload)
     if ok:
-        print("✅ 报告已发送。")
+        log(cfg, MODULE, "INFO ", "报告已发送至 Telegram")
     else:
-        err_log.parent.mkdir(parents=True, exist_ok=True)
-        with open(err_log, "a", encoding="utf-8") as f:
-            f.write("❌ 报告发送失败。\n")
+        log(cfg, MODULE, "ERROR", "报告发送失败")
+    log(cfg, MODULE, "END  ", "========== 日报任务结束 ==========")
     return 0 if ok else 1
 
 

@@ -6,16 +6,14 @@ from __future__ import annotations
 import fcntl
 import os
 import random
-import subprocess
 import sys
 import time
-from pathlib import Path
 
+from agent_spawn import resolve_py_script, spawn_py_script
 from config import require_config
 from log_util import log
 
 LOCK_PATH = "/tmp/ip_sentinel_runner.lock"
-PY_DIR = Path(__file__).resolve().parent
 
 
 def _acquire_lock(cfg: dict) -> int | None:
@@ -68,18 +66,14 @@ def run() -> int:
             return 0
 
         script_name, mod_name = picked
-        script_path = PY_DIR / script_name
-        if not script_path.is_file():
-            log(cfg, "SYSTEM", "ERROR", f"配置了模块 {mod_name}，但未找到: {script_path}")
+        if not resolve_py_script(script_name, cfg):
+            log(cfg, "SYSTEM", "ERROR", f"配置了模块 {mod_name}，但未找到: {script_name}")
             return 1
 
         log(cfg, "SYSTEM", "INFO", f"命中触发条件，加载并执行子模块: {mod_name}")
-        subprocess.Popen(
-            ["nice", "-n", "19", sys.executable, str(script_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        if not spawn_py_script(script_name, log_module="SYSTEM", nice=True):
+            log(cfg, "SYSTEM", "ERROR", f"子模块启动失败: {script_name}")
+            return 1
         log(cfg, "SYSTEM", "INFO", "本轮模块调度完成。")
         return 0
     finally:

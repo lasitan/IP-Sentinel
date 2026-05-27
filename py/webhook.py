@@ -23,7 +23,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from agent_spawn import spawn_py_script
 from config import DEFAULT_INSTALL_DIR
+from log_util import log as agent_log
 
 PY_DIR = Path(__file__).resolve().parent
 INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
@@ -65,31 +67,15 @@ def _load_config_mem() -> dict[str, str]:
     return cfg
 
 
-def _spawn_py(script: str) -> None:
-    path = PY_DIR / script
-    if path.is_file():
-        subprocess.Popen(
-            [sys.executable, str(path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-
-def _spawn_runner() -> None:
-    runner = PY_DIR / "runner.py"
-    if runner.is_file():
-        subprocess.Popen(
-            [sys.executable, str(runner)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-
 class AgentHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         pass
+
+    def _cfg(self) -> dict[str, str]:
+        return _load_config_mem()
+
+    def _webhook_log(self, level: str, msg: str) -> None:
+        agent_log(self._cfg(), "Webhook", level, msg)
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urllib.parse.urlparse(self.path)
@@ -133,44 +119,39 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             USED_SIGNS[req_sign] = time.time()
 
         if req_path == "/trigger_run":
-            if (PY_DIR / "runner.py").is_file():
-                self._ok(b"Action Accepted: runner\n")
-                _spawn_runner()
-            else:
-                self.send_response(404)
-                self.end_headers()
+            self._dispatch_spawn("runner.py", "立即巡逻 (/trigger_run)")
             return
 
         if req_path == "/trigger_google":
-            if (PY_DIR / "mod_google.py").is_file():
-                self._ok(b"Action Accepted: mod_google\n")
-                _spawn_py("mod_google.py")
-            else:
+            cfg = self._cfg()
+            self._webhook_log("INFO ", "收到 Master 指令: Google 纠偏 (/trigger_google)")
+            if cfg.get("ENABLE_GOOGLE", "false").lower() != "true":
                 self._forbidden(b"403 Forbidden: Google Module Disabled\n")
+                return
+            self._dispatch_spawn("mod_google.py", "Google 纠偏", log_received=False)
             return
 
         if req_path == "/trigger_trust":
-            if (PY_DIR / "mod_trust.py").is_file():
-                self._ok(b"Action Accepted: mod_trust\n")
-                _spawn_py("mod_trust.py")
-            else:
+            cfg = self._cfg()
+            self._webhook_log("INFO ", "收到 Master 指令: IP 信用净化 (/trigger_trust)")
+            if cfg.get("ENABLE_TRUST", "false").lower() != "true":
                 self._forbidden(b"403 Forbidden: Trust Module Disabled\n")
+                return
+            self._dispatch_spawn("mod_trust.py", "IP 信用净化", log_received=False)
             return
 
         if req_path == "/trigger_report":
-            self._ok(b"Action Accepted: tg_report\n")
-            _spawn_py("report.py")
+            self._dispatch_spawn("report.py", "生成报告 (/trigger_report)")
             return
 
         if req_path == "/trigger_log":
+            self._webhook_log("INFO ", "收到 Master 指令: 拉取日志 (/trigger_log)")
             self._ok(b"Action Accepted: fetch_log\n")
             self._handle_log()
             return
 
         if req_path == "/trigger_quality":
-            self._ok(b"Action Accepted: trigger_quality\n")
-            if (PY_DIR / "mod_quality.py").is_file():
-                _spawn_py("mod_quality.py")
+            self._dispatch_spawn("mod_quality.py", "IP 质量检测 (/trigger_quality)")
             return
 
         if req_path == "/trigger_rename":
@@ -188,6 +169,20 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _dispatch_spawn(
+        self,
+        script: str,
+        action_label: str,
+        *,
+        log_received: bool = True,
+    ) -> None:
+        if log_received:
+            self._webhook_log("INFO ", f"收到 Master 指令: {action_label}")
+        if spawn_py_script(script, log_module="Webhook"):
+            self._ok(f"Action Accepted: {script}\n".encode())
+        else:
+            self._service_unavailable(script)
+
     def _ok(self, body: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
@@ -200,10 +195,18 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _service_unavailable(self, script: str) -> None:
+        self._webhook_log("ERROR", f"拒绝执行：未找到 {script}")
+        self.send_response(503)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(f"503 Service Unavailable: {script} missing\n".encode())
+
     def _handle_log(self) -> None:
+        cfg = self._cfg()
         try:
-            cfg = _load_config_mem()
-            log_path = f"{INSTALL_DIR}/logs/sentinel.log"
+            install = cfg.get("INSTALL_DIR", INSTALL_DIR)
+            log_path = f"{install}/logs/sentinel.log"
             log_data = "日志文件不存在或为空"
             if os.path.isfile(log_path):
                 with open(log_path, encoding="utf-8", errors="ignore") as f:
@@ -225,20 +228,30 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                     ]
                 },
             }
+            api_url = cfg.get("TG_API_URL", "")
+            if not api_url or not cfg.get("CHAT_ID"):
+                self._webhook_log("ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
+                return
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                cfg.get("TG_API_URL", ""),
+                api_url,
                 data=data,
                 headers={
                     "User-Agent": f"IP-Sentinel-Agent/{ver}",
                     "Content-Type": "application/json",
                 },
             )
-            urllib.request.urlopen(req, timeout=10)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read().decode(errors="ignore")
+                if '"ok":true' in body:
+                    self._webhook_log("INFO ", "实时日志已推送至 Telegram")
+                else:
+                    self._webhook_log("WARN ", f"Telegram 返回异常: {body[:200]}")
         except Exception as exc:
-            print(f"Log transmission failed: {exc}")
+            self._webhook_log("ERROR", f"拉取日志推送失败: {exc}")
 
     def _handle_rename(self, query: dict) -> None:
+        self._webhook_log("INFO ", "收到 Master 指令: 重命名节点 (/trigger_rename)")
         b64_alias = query.get("b64", [""])[0]
         if not b64_alias:
             self.send_response(400)
@@ -275,8 +288,10 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 f.truncate()
                 fcntl.flock(f, fcntl.LOCK_UN)
 
+            self._webhook_log("INFO ", f"节点别名已更新为: {safe}")
             self._ok(b"Action Accepted: trigger_rename\n")
         except Exception as exc:
+            self._webhook_log("ERROR", f"重命名失败: {exc}")
             self.send_response(500)
             self.end_headers()
             self.wfile.write(f"500 Internal Error: {exc}\n".encode())
@@ -284,6 +299,10 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
     def _handle_toggle(self, query: dict) -> None:
         mod_name = query.get("mod", [""])[0]
         target_state = query.get("state", [""])[0].lower()
+        self._webhook_log(
+            "INFO ",
+            f"收到 Master 指令: 切换模块 {mod_name}={target_state} (/trigger_toggle)",
+        )
         if mod_name not in ("google", "trust") or target_state not in ("true", "false"):
             self.send_response(400)
             self.end_headers()
@@ -306,15 +325,18 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 f.writelines(lines)
                 f.truncate()
                 fcntl.flock(f, fcntl.LOCK_UN)
+            self._webhook_log("INFO ", f"已写入配置 {key}{target_state}")
             self._ok(b"Action Accepted: trigger_toggle\n")
         except Exception as exc:
+            self._webhook_log("ERROR", f"切换模块失败: {exc}")
             self.send_response(500)
             self.end_headers()
             self.wfile.write(f"500 Internal Error: {exc}\n".encode())
 
     def _handle_ota(self) -> None:
         try:
-            cfg = _load_config_mem()
+            cfg = self._cfg()
+            self._webhook_log("INFO ", "收到 Master 指令: OTA 升级 (/trigger_ota)")
             if cfg.get("ENABLE_OTA", "false").lower() != "true":
                 self._forbidden(b"403 Forbidden: OTA Upgrade Disabled locally\n")
                 return
@@ -325,7 +347,8 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             self._ok(b"Action Accepted: trigger_ota\n")
 
             repo_url = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
-            install_sh = f"{INSTALL_DIR}/core/install.sh"
+            install = cfg.get("INSTALL_DIR", INSTALL_DIR)
+            install_sh = f"{install}/core/install.sh"
             if os.path.isfile(install_sh):
                 with open(install_sh, encoding="utf-8", errors="ignore") as f:
                     for line in f:
@@ -347,11 +370,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
 export SILENT_OTA="true"
 curl -fsSL {repo_url}/core/install.sh -o /tmp/ota_agent.sh
 if bash -n /tmp/ota_agent.sh; then
-    bash /tmp/ota_agent.sh > {INSTALL_DIR}/logs/ota_upgrade.log 2>&1
+    bash /tmp/ota_agent.sh > {install}/logs/ota_upgrade.log 2>&1
 else
     MSG=$(echo '{err_b64}' | base64 -d)
     curl -s -m 10 -X POST "{tg_url}" -d "chat_id={chat_id}" -d "text=$MSG" -d "parse_mode=Markdown" > /dev/null 2>&1
-    echo "OTA Checksum Failed: Script corrupted" > {INSTALL_DIR}/logs/ota_upgrade.log
+    echo "OTA Checksum Failed: Script corrupted" > {install}/logs/ota_upgrade.log
 fi
 """
             ota_b64 = base64.b64encode(ota_script.encode()).decode()
@@ -360,7 +383,9 @@ fi
             else:
                 cmd = f"nohup bash -c \"echo '{ota_b64}' | base64 -d | bash\" >/dev/null 2>&1 &"
             subprocess.Popen(cmd, shell=True, start_new_session=True)
+            self._webhook_log("INFO ", "OTA 任务已提交后台执行")
         except Exception as exc:
+            self._webhook_log("ERROR", f"OTA 触发失败: {exc}")
             self.send_response(500)
             self.end_headers()
             self.wfile.write(f"500 Internal Error: {exc}\n".encode())
