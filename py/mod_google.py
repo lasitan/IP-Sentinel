@@ -50,10 +50,16 @@ def run(cfg: dict | None = None) -> int:
     lang = cfg.get("LANG_PARAMS", "hl=en&gl=US")
     maps_geo_mode = maps_geo_enabled(cfg)
     maps_locale = parse_lang_locale(lang)
+    maps_geo_visits = 0
 
     log(cfg, MODULE, "INFO ", f"当前出网 IP: {current_ip}")
     log(cfg, MODULE, "INFO ", f"设备指纹锁定: {session_ua[:45]}...")
-    log(cfg, MODULE, "INFO ", f"虚拟驻留坐标: {session_lat}, {session_lon}")
+    log(
+        cfg,
+        MODULE,
+        "INFO ",
+        f"虚拟驻留坐标 (会话基准): {session_lat}, {session_lon} | 基准点: {base_lat}, {base_lon}",
+    )
 
     def _log(level: str, msg: str) -> None:
         log(cfg, MODULE, level, msg)
@@ -66,6 +72,12 @@ def run(cfg: dict | None = None) -> int:
         keyword = random.choice(keywords)
         encoded = uri_encode_keyword(keyword)
         action_type = random.randint(1, 4)
+        log(
+            cfg,
+            MODULE,
+            "INFO ",
+            f"动作 [{i}/{total_actions}] 虚拟坐标: {action_lat}, {action_lon}",
+        )
 
         if action_type == 1:
             url = f"https://www.google.com/search?q={encoded}&{lang}"
@@ -79,6 +91,12 @@ def run(cfg: dict | None = None) -> int:
                 f"@{action_lat},{action_lon},17z?{lang}"
             )
             code = 0
+            log(
+                cfg,
+                MODULE,
+                "INFO ",
+                f"Maps 动作 | 搜索虚拟坐标: {action_lat}, {action_lon} | 关键词: {keyword[:40]}",
+            )
             if maps_geo_mode in ("true", "auto"):
                 geo_result = visit_google_maps(
                     maps_url=url,
@@ -90,12 +108,7 @@ def run(cfg: dict | None = None) -> int:
                 )
                 if geo_result == "ok":
                     code = 200
-                    log(
-                        cfg,
-                        MODULE,
-                        "INFO ",
-                        f"Maps 已用 Chromium Geolocation 定位至搜索坐标: {action_lat}, {action_lon}",
-                    )
+                    maps_geo_visits += 1
                 else:
                     log(cfg, MODULE, "WARN ", f"Maps 浏览器访问失败 ({geo_result})，回退为 HTTP。")
 
@@ -135,6 +148,7 @@ def run(cfg: dict | None = None) -> int:
     status = score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc)
 
     log(cfg, MODULE, "SCORE", f"自检结论: {status}")
+    log(cfg, MODULE, "INFO ", f"本次会话 Maps 虚拟定位访问: {maps_geo_visits} 次")
     log(cfg, MODULE, "END  ", "========== 会话结束，释放进程 ==========")
     return 0
 

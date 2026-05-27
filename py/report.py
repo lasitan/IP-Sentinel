@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram 日报：日志统计、节点状态、版本检查."""
+"""Telegram 日报：过去 24 小时日志统计、节点状态、版本检查."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from log_util import load_log_lines_within_hours
 
 from config import load_config
 from network import build_curl_context
@@ -34,6 +36,23 @@ FLAGS = {
     "UA": "🇺🇦", "MO": "🇲🇴", "KH": "🇰🇭", "MM": "🇲🇲", "LA": "🇱🇦",
     "MN": "🇲🇳", "NP": "🇳🇵", "BD": "🇧🇩",
 }
+
+
+_MAPS_GEO_DONE_RE = re.compile(r"\[MAPS_GEO\].*访问完成")
+_MAPS_GEO_SESSION_RE = re.compile(r"本次会话 Maps 虚拟定位访问:\s*(\d+)\s*次")
+
+
+def _count_maps_geo_visits(google_lines: list[str]) -> int:
+    """统计 24h 内 Maps Chromium 虚拟定位成功次数。"""
+    per_visit = sum(1 for ln in google_lines if _MAPS_GEO_DONE_RE.search(ln))
+    if per_visit:
+        return per_visit
+    session_total = 0
+    for ln in google_lines:
+        m = _MAPS_GEO_SESSION_RE.search(ln)
+        if m:
+            session_total += int(m.group(1))
+    return session_total
 
 
 def _node_name(cfg: dict) -> str:
@@ -168,12 +187,9 @@ def run() -> int:
     region_name = cfg.get("REGION_NAME", base_cc)
 
     log_path = Path(cfg.get("LOG_FILE", f"{install}/logs/sentinel.log"))
-    log_content = ""
-    if log_path.is_file():
-        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        log_content = "\n".join(lines[-1000:])
+    day_lines = load_log_lines_within_hours(log_path, hours=24.0)
 
-    if not log_content.strip():
+    if not day_lines:
         msg = (
             "🛑 **[IP-Sentinel] 告警：节点异常**\n"
             "----------------------------\n"
@@ -182,7 +198,7 @@ def run() -> int:
             "🛠️ **建议**: 节点可能刚安装，请在面板手动执行一次维护任务。"
         )
     else:
-        score_lines = [ln for ln in log_content.splitlines() if "[SCORE]" in ln]
+        score_lines = [ln for ln in day_lines if "[SCORE]" in ln]
         last_line = score_lines[-1] if score_lines else ""
         last_time = ""
         last_mod = "System"
@@ -206,33 +222,35 @@ def run() -> int:
         )
 
         if cfg.get("ENABLE_GOOGLE", "false").lower() == "true":
-            g_logs = [ln for ln in log_content.splitlines() if "[Google" in ln]
+            g_logs = [ln for ln in day_lines if "[Google" in ln]
             g_total = sum(1 for ln in g_logs if "[START]" in ln)
             g_ok = sum(1 for ln in g_logs if "✅" in ln)
             g_fail = sum(1 for ln in g_logs if "❌" in ln)
             g_warn = sum(1 for ln in g_logs if "⚠️" in ln)
+            g_maps_geo = _count_maps_geo_visits(g_logs)
             rate = f"{(g_ok / g_total * 100):.1f}" if g_total else "0.0"
             msg += (
-                f"\n\n🎯 **[Google 区域纠偏]**\n"
+                f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
                 f"🚀 执行总数: {g_total} 次 (胜率: **{rate}%**)\n"
-                f"✅ 成功: {g_ok} | ❌ CN 判定: {g_fail} | ⚠️ 警告: {g_warn}"
+                f"✅ 成功: {g_ok} | ❌ CN 判定: {g_fail} | ⚠️ 警告: {g_warn}\n"
+                f"📍 虚拟定位 (Maps Chromium): **{g_maps_geo}** 次"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":
-            t_logs = [ln for ln in log_content.splitlines() if "[Trust" in ln]
+            t_logs = [ln for ln in day_lines if "[Trust" in ln]
             t_total = sum(1 for ln in t_logs if "[START]" in ln)
             t_ok = sum(1 for ln in t_logs if "✅" in ln)
             t_fail = sum(1 for ln in t_logs if "❌" in ln)
             rate = f"{(t_ok / t_total * 100):.1f}" if t_total else "0.0"
             msg += (
-                f"\n\n🔰 **[IP 信用净化]**\n"
+                f"\n\n🔰 **[IP 信用净化]** (过去 24 小时)\n"
                 f"🚀 净化总数: {t_total} 轮 (成功率: **{rate}%**)\n"
                 f"✅ 成功注入: {t_ok} | ❌ 访问受阻: {t_fail}"
             )
 
         msg += (
-            f"\n\n🕒 **最近执行快照:  `{last_mod}`**\n"
-            f"时间: {last_time or '暂无数据'} (节点本地)\n"
+            f"\n\n🕒 **最近执行快照 (过去 24 小时):  `{last_mod}`**\n"
+            f"时间: {last_time or '暂无数据'} (UTC)\n"
             f"结论: {last_score}"
         )
 

@@ -3,10 +3,63 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+LOG_TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]")
+LOG_RETENTION_DAYS = 2
+
+
+def parse_log_line_ts(line: str) -> datetime | None:
+    m = LOG_TS_RE.match(line)
+    if not m:
+        return None
+    return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def lines_within_hours(lines: list[str], hours: float) -> list[str]:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    return [ln for ln in lines if (ts := parse_log_line_ts(ln)) is not None and ts >= cutoff]
+
+
+def load_log_lines_within_hours(log_path: Path, hours: float = 48.0) -> list[str]:
+    """从日志尾部向前扫描，返回时间窗口内的行。"""
+    if not log_path.is_file():
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+    kept: list[str] = []
+    for line in reversed(lines):
+        ts = parse_log_line_ts(line)
+        if ts is None:
+            continue
+        if ts < cutoff:
+            break
+        kept.append(line)
+    kept.reverse()
+    return kept
+
+
+def prune_log_file(log_path: Path, keep_days: float = LOG_RETENTION_DAYS) -> int:
+    """删除早于 keep_days 的日志行，返回删除的行数。"""
+    if not log_path.is_file():
+        return 0
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return 0
+    kept = lines_within_hours(lines, keep_days * 24)
+    removed = len(lines) - len(kept)
+    if removed > 0:
+        log_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    return removed
 
 
 def _ensure_log_dir(cfg: dict[str, Any]) -> None:

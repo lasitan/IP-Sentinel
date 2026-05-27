@@ -9,14 +9,11 @@ import time
 from pathlib import Path
 
 from config import require_config
-from log_util import log
+from log_util import LOG_RETENTION_DAYS, log, prune_log_file
 from network import build_curl_context
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 UA_COOLDOWN_SEC = 2592000  # 30 天
-LOG_KEEP_LINES = 2000
-
-
 def _curl_download(ctx, url: str, dest: Path, timeout: int = 60) -> bool:
     cmd = ["curl", *ctx.bind_opt, ctx.ip_flag, "-fsSL", "-m", str(timeout), url, "-o", str(dest)]
     try:
@@ -100,11 +97,9 @@ def run() -> int:
         _log("WARN ", "❌ 探针源文件拉取失败，保留本地旧版本")
 
     log_file = Path(cfg.get("LOG_FILE", install / "logs" / "sentinel.log"))
-    if log_file.is_file():
-        lines = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-        if len(lines) > LOG_KEEP_LINES:
-            log_file.write_text("\n".join(lines[-LOG_KEEP_LINES:]) + "\n", encoding="utf-8")
-            _log("INFO ", f"🧹 系统日志已完成定期清理瘦身 (保留最新 {LOG_KEEP_LINES} 行)")
+    removed = prune_log_file(log_file, keep_days=LOG_RETENTION_DAYS)
+    if removed > 0:
+        _log("INFO ", f"🧹 系统日志已清理 (保留最近 {LOG_RETENTION_DAYS} 天，删除 {removed} 行)")
 
     _log("INFO ", "========== OTA 养料注入与系统维护结束 ==========")
     return 0
