@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ def _extract_update(update: dict[str, Any]) -> tuple[str, str, str | None, int |
     cb_msg = cb.get("message") or {}
 
     chat_id = str(msg.get("chat", {}).get("id") or cb_msg.get("chat", {}).get("id") or "")
-    text = msg.get("text") or cb.get("data") or ""
+    text = (msg.get("text") or cb.get("data") or "").strip()
     cb_id = cb.get("id")
     msg_id = cb_msg.get("message_id")
     reply_to = (msg.get("reply_to_message") or {}).get("text") or ""
@@ -36,6 +38,8 @@ def run() -> None:
     tg = TelegramAPI(cfg["TG_TOKEN"])
     handlers = MasterHandlers(cfg, db, tg)
 
+    print("[ip-sentinel-master] 长轮询已启动", flush=True)
+
     while True:
         try:
             offset = int(offset_file.read_text(encoding="utf-8").strip() or "0")
@@ -45,18 +49,35 @@ def run() -> None:
         updates = tg.get_updates(offset, timeout=30)
         for update in updates:
             uid = update.get("update_id", 0)
-            offset_file.write_text(str(uid + 1), encoding="utf-8")
+            next_offset = uid + 1
 
             chat_id, text, cb_id, msg_id, reply_to = _extract_update(update)
-            if not text and not chat_id:
+            if not chat_id:
+                offset_file.write_text(str(next_offset), encoding="utf-8")
                 continue
-            handlers.dispatch(
-                chat_id,
-                text,
-                cb_id=cb_id,
-                msg_id=msg_id,
-                reply_to_text=reply_to,
-            )
+
+            try:
+                handlers.dispatch(
+                    chat_id,
+                    text,
+                    cb_id=cb_id,
+                    msg_id=msg_id,
+                    reply_to_text=reply_to,
+                )
+            except Exception:
+                print(
+                    f"[ip-sentinel-master] 处理 update {uid} 异常:\n{traceback.format_exc()}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if chat_id:
+                    tg.send_message(
+                        chat_id,
+                        "⚠️ 处理请求时发生内部错误，请稍后重试或发送 /start。",
+                        markdown=False,
+                    )
+
+            offset_file.write_text(str(next_offset), encoding="utf-8")
 
         time.sleep(1)
 

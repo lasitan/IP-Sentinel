@@ -300,6 +300,7 @@ class MasterHandlers:
         if rewritten:
             text = rewritten
 
+        # 先应答 callback，消除客户端 loading；避免未传 text 导致 TypeError
         if cb_id:
             self.tg.answer_callback(cb_id)
 
@@ -307,67 +308,96 @@ class MasterHandlers:
             return
 
         auth = self._auth_key(chat_id)
+        handled = False
 
         if text in ("/start", "/menu"):
-            self._cmd_start(chat_id)
+            self._cmd_start(chat_id, msg_id)
+            handled = True
+        elif text == "ignore":
+            handled = True
         elif text == "all_ota_confirm":
-            self._cmd_all_ota_confirm(chat_id)
+            self._cmd_all_ota_confirm(chat_id, msg_id)
+            handled = True
         elif text == "all_ota_execute":
             self._cmd_all_ota_execute(chat_id)
+            handled = True
         elif text == "master_ota_confirm":
             self._cmd_master_ota_confirm(chat_id, msg_id)
+            handled = True
         elif text == "master_ota_execute":
             self._cmd_master_ota_execute(chat_id, msg_id)
+            handled = True
         elif text == "all_reports":
             self._cmd_all_reports(chat_id)
+            handled = True
         elif text == "all_run":
             self._cmd_all_run(chat_id)
+            handled = True
         elif text.startswith("/quality"):
             self._cmd_quality(chat_id, text)
+            handled = True
         elif text.startswith("/trend"):
             self._cmd_trend(chat_id, text)
+            handled = True
         elif text == "list_nodes":
-            self._cmd_list_nodes(chat_id)
+            self._cmd_list_nodes(chat_id, msg_id)
+            handled = True
         elif text.startswith("region:"):
-            self._cmd_region(chat_id, text.split(":", 1)[1])
+            self._cmd_region(chat_id, text.split(":", 1)[1], msg_id)
+            handled = True
         elif text.startswith("manage:"):
             self._cmd_manage(chat_id, text.split(":", 1)[1], msg_id)
+            handled = True
         elif text.startswith("toggle:"):
             self._cmd_toggle(chat_id, text, msg_id, auth)
+            handled = True
         elif text.startswith("del:"):
-            self._cmd_del(chat_id, text.split(":", 1)[1])
+            self._cmd_del(chat_id, text.split(":", 1)[1], msg_id)
+            handled = True
         elif text.startswith("rename:"):
             self._cmd_rename(chat_id, text.split(":", 1)[1])
+            handled = True
         elif text.startswith("do_rename:"):
             self._cmd_do_rename(chat_id, text, auth)
+            handled = True
         elif text.startswith("ota_confirm:"):
             self._cmd_ota_confirm(chat_id, text.split(":", 1)[1])
+            handled = True
         elif text.startswith("ota_execute:"):
             self._cmd_ota_execute(chat_id, text.split(":", 1)[1], msg_id, auth)
+            handled = True
         elif text.startswith("trend:"):
             self._cmd_trend_callback(chat_id, text.split(":", 1)[1], msg_id)
+            handled = True
         elif any(text.startswith(p) for p in ("google:", "trust:", "run:", "report:", "log:", "quality:")):
             self._cmd_agent_action(chat_id, text, msg_id, auth)
+            handled = True
 
-    def _cmd_start(self, chat_id: str) -> None:
+        if not handled and text:
+            self.tg.send_message(chat_id, "未识别的指令，请发送 /start 打开菜单。", markdown=False)
+
+    def _cmd_start(self, chat_id: str, msg_id: int | None = None) -> None:
         remote = self._remote_version()
         ver = f"当前版本: `{self.version}`"
-        btn_ota: list = []
         if remote:
             if remote != self.version:
-                ver += f"\n✨ **发现新版本**: `{remote}` (可升级 Master)"
-                if not self.official and self.master_ota:
-                    btn_ota = [[{"text": f"🆙 升级 Master 至 v{remote}", "callback_data": "master_ota_confirm"}]]
+                ver += f"\n✨ **发现新版本**: `{remote}`"
             else:
-                ver = f"当前版本: `{self.version}` (✅已是最新)"
+                ver += "\n✅ 已是最新版本（仍可手动 OTA 以修复或重载）"
+
         count = self.db.scalar("SELECT COUNT(*) FROM nodes WHERE chat_id=?", (chat_id,)) or 0
+        kb: list = []
+        if not self.official and self.master_ota:
+            ota_label = f"🆙 升级本机 Master → v{remote}" if remote and remote != self.version else "🆙 升级本机 Master"
+            kb.append([{"text": ota_label, "callback_data": "master_ota_confirm"}])
+
         row2 = [
             {"text": "🚀 全部执行维护", "callback_data": "all_run"},
             {"text": "📊 全部生成报告", "callback_data": "all_reports"},
         ]
         if not self.official:
             row2.append({"text": "🔄 全部节点 OTA", "callback_data": "all_ota_confirm"})
-        kb = btn_ota + [
+        kb += [
             [{"text": "🌍 管理节点", "callback_data": "list_nodes"}],
             row2,
             [{"text": "🌟 前往 GitHub 点亮星标", "url": "https://github.com/lasitan/IP-Sentinel"}],
@@ -376,7 +406,10 @@ class MasterHandlers:
             f"🛡️ **IP-Sentinel Master**\n{ver}\n\n"
             f"📊 已注册节点: `{count}` 台\n请选择操作："
         )
-        self.tg.send_ui(chat_id, msg, kb)
+        if msg_id:
+            self.tg.edit_ui(chat_id, msg_id, msg, kb)
+        else:
+            self.tg.send_ui(chat_id, msg, kb)
 
     def _remote_version(self) -> str:
         try:
@@ -389,7 +422,7 @@ class MasterHandlers:
             pass
         return ""
 
-    def _cmd_all_ota_confirm(self, chat_id: str) -> None:
+    def _cmd_all_ota_confirm(self, chat_id: str, msg_id: int | None = None) -> None:
         kb = [
             [{"text": "🚨 确认执行", "callback_data": "all_ota_execute"}],
             [{"text": "取消操作", "callback_data": "/start"}],
@@ -402,7 +435,10 @@ class MasterHandlers:
             "2. 若无法访问 GitHub，部分节点需手动升级。\n\n"
             "**是否继续？**"
         )
-        self.tg.send_ui(chat_id, warn, kb)
+        if msg_id:
+            self.tg.edit_ui(chat_id, msg_id, warn, kb)
+        else:
+            self.tg.send_ui(chat_id, warn, kb)
 
     def _cmd_all_ota_execute(self, chat_id: str) -> None:
         rows = self.db.execute(
@@ -419,14 +455,39 @@ class MasterHandlers:
         self._fanout_agents(chat_id, "/trigger_ota", filter_ota=True, delay=0.3)
 
     def _cmd_master_ota_confirm(self, chat_id: str, msg_id: int | None) -> None:
+        if self.official:
+            self.tg.send_message(
+                chat_id,
+                "⚠️ 官方公共网关未开放 Master 自升级，请使用私有 Master。",
+                markdown=False,
+            )
+            return
+        if not self.master_ota:
+            self.tg.send_message(
+                chat_id,
+                "⚠️ 安装时未开启 Master OTA。请 SSH 执行 install_master.sh 重新安装并启用，或手动升级。",
+                markdown=False,
+            )
+            return
+
+        remote = self._remote_version()
+        target = remote or self.version
         kb = [
             [{"text": "🚨 确认升级", "callback_data": "master_ota_execute"}],
             [{"text": "取消操作", "callback_data": "/start"}],
         ]
+        same_ver = remote == self.version if remote else True
+        extra = (
+            "\n\n💡 云端版本与当前一致，将重新拉取并覆盖程序（可用于修复异常）。"
+            if same_ver
+            else ""
+        )
         warn = (
-            "**Master OTA 升级**\n\n"
-            "将拉取最新代码并重启 Master 服务。\n\n"
-            "⚠️ 升级期间约 3–5 秒无法响应。\n\n"
+            f"**Master OTA 升级**\n\n"
+            f"当前: `{self.version}` → 目标: `{target}`\n\n"
+            "将拉取最新安装脚本与 Python 代码并重启本机 Master。\n\n"
+            "⚠️ 升级期间约 3–5 秒无法响应。"
+            f"{extra}\n\n"
             "**是否继续？**"
         )
         if msg_id:
@@ -435,6 +496,10 @@ class MasterHandlers:
             self.tg.send_ui(chat_id, warn, kb)
 
     def _cmd_master_ota_execute(self, chat_id: str, msg_id: int | None) -> None:
+        if self.official or not self.master_ota:
+            self.tg.send_message(chat_id, "⚠️ 当前环境不允许 Master OTA。", markdown=False)
+            return
+
         note = "⏳ 正在下载安装脚本，Master 即将重启…"
         if msg_id:
             self.tg.edit_message(chat_id, msg_id, note)
@@ -541,18 +606,18 @@ class MasterHandlers:
         else:
             self.tg.send_ui(chat_id, body, kb)
 
-    def _cmd_list_nodes(self, chat_id: str) -> None:
+    def _cmd_list_nodes(self, chat_id: str, msg_id: int | None = None) -> None:
         kb = self._region_keyboard(chat_id, home_btn=True)
         if not kb:
-            self.tg.send_message(chat_id, "⚠️ 您名下暂无在线节点，请先在边缘机执行部署。")
+            self.tg.send_message(chat_id, "⚠️ 您名下暂无在线节点，请先在边缘机执行部署。", markdown=False)
             return
-        self.tg.send_ui(
-            chat_id,
-            "🌍 **按区域查看节点**\n请选择区域：",
-            kb,
-        )
+        body = "🌍 **按区域查看节点**\n请选择区域："
+        if msg_id:
+            self.tg.edit_ui(chat_id, msg_id, body, kb)
+        else:
+            self.tg.send_ui(chat_id, body, kb)
 
-    def _cmd_region(self, chat_id: str, region: str) -> None:
+    def _cmd_region(self, chat_id: str, region: str, msg_id: int | None = None) -> None:
         region = sanitize_region(region)
         rows = self.db.execute(
             "SELECT node_name, COALESCE(node_alias, node_name) AS alias FROM nodes WHERE chat_id=? AND region=?",
@@ -578,11 +643,11 @@ class MasterHandlers:
                 {"text": "🏠 返回主菜单", "callback_data": "/start"},
             ]
         )
-        self.tg.send_ui(
-            chat_id,
-            f"📍 **[{region}] 节点列表**\n请选择节点：",
-            kb,
-        )
+        body = f"📍 **[{region}] 节点列表**\n请选择节点："
+        if msg_id:
+            self.tg.edit_ui(chat_id, msg_id, body, kb)
+        else:
+            self.tg.send_ui(chat_id, body, kb)
 
     def _cmd_manage(self, chat_id: str, node: str, msg_id: int | None) -> None:
         node = sanitize_node_name(node)
@@ -598,19 +663,22 @@ class MasterHandlers:
     def _cmd_toggle(self, chat_id: str, text: str, msg_id: int | None, auth: str) -> None:
         parts = text.split(":")
         if len(parts) < 4:
+            self.tg.send_message(chat_id, "❌ 按钮数据无效，请返回节点面板重试。", markdown=False)
             return
         _, mod, node, state = parts[0], parts[1], parts[2], parts[3]
         node = sanitize_node_name(node)
         if mod not in ("google", "trust") or state not in ("true", "false"):
+            self.tg.send_message(chat_id, "❌ 无效的模块开关参数。", markdown=False)
             return
         info = self._agent_row(chat_id, node)
         if not info:
+            self.tg.send_message(chat_id, f"❌ 未找到节点 `{node}`。", markdown=False)
             return
         ip, port = info
         url = generate_signed_url(auth, ip, port, "/trigger_toggle") + f"&mod={mod}&state={state}"
         resp = call_agent(url)
         if "Action Accepted" not in resp:
-            self.tg.send_message(chat_id, "❌ 指令下发失败，安全策略禁止降级重试。")
+            self.tg.send_message(chat_id, "❌ 指令下发失败，请检查节点在线与防火墙。", markdown=False)
             return
         col = "enable_google" if mod == "google" else "enable_trust"
         self.db.execute(
@@ -620,12 +688,14 @@ class MasterHandlers:
         base, kb = self._manage_keyboard(chat_id, node)
         text_msg = base.replace(
             "请选择操作：",
-            f"✅ **执行成功**: 模块 [{mod}] 状态已切换为 {state}！\n",
+            f"✅ **执行成功**: 模块 [{mod}] 已设为 {state}\n",
         )
         if msg_id:
             self.tg.edit_ui(chat_id, msg_id, text_msg, kb)
+        else:
+            self.tg.send_ui(chat_id, text_msg, kb)
 
-    def _cmd_del(self, chat_id: str, node: str) -> None:
+    def _cmd_del(self, chat_id: str, node: str, msg_id: int | None = None) -> None:
         node = sanitize_node_name(node)
         ok = self.db.scalar(
             "SELECT 1 FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1",
@@ -637,11 +707,15 @@ class MasterHandlers:
         self.db.execute("DELETE FROM nodes WHERE chat_id=? AND node_name=?", (chat_id, node))
         self.db.execute("DELETE FROM ip_trend_log WHERE node_name=?", (node,))
         self.tg.send_message(chat_id, f"🗑️ 已删除节点 `{node}` 及其历史记录。")
-        kb = self._region_keyboard(chat_id)
+        kb = self._region_keyboard(chat_id, home_btn=True)
         if kb:
-            self.tg.send_ui(chat_id, "🌍 节点列表：", kb)
+            body = "🌍 节点列表："
+            if msg_id:
+                self.tg.edit_ui(chat_id, msg_id, body, kb)
+            else:
+                self.tg.send_ui(chat_id, body, kb)
         else:
-            self.tg.send_message(chat_id, "⚠️ 当前没有任何已注册节点。")
+            self.tg.send_message(chat_id, "⚠️ 当前没有任何已注册节点。", markdown=False)
 
     def _cmd_rename(self, chat_id: str, node: str) -> None:
         node = sanitize_node_name(node)
@@ -712,9 +786,10 @@ class MasterHandlers:
         else:
             result = "✅ OTA 已触发，节点正在后台升级…"
         if msg_id:
-            self.tg.edit_message(chat_id, msg_id, result)
+            if not self.tg.edit_message(chat_id, msg_id, result):
+                self.tg.send_message(chat_id, result, markdown=False)
         else:
-            self.tg.send_message(chat_id, result)
+            self.tg.send_message(chat_id, result, markdown=False)
 
     def _cmd_agent_action(self, chat_id: str, text: str, msg_id: int | None, auth: str) -> None:
         action = text.split(":", 1)[0]
@@ -746,6 +821,7 @@ class MasterHandlers:
         else:
             result = f"✅ 节点 `{node}` 接收指令: {action}"
         if msg_id:
-            self.tg.edit_message(chat_id, msg_id, result)
+            if not self.tg.edit_message(chat_id, msg_id, result):
+                self.tg.send_message(chat_id, result, markdown=False)
         else:
-            self.tg.send_message(chat_id, result)
+            self.tg.send_message(chat_id, result, markdown=False)

@@ -3,16 +3,30 @@
 from __future__ import annotations
 
 import json
+import re
 import ssl
+import sys
 import urllib.error
 import urllib.request
 from typing import Any
+
+# Telegram legacy Markdown 中需转义的字符（代码块内除外）
+_MD_SPECIAL = re.compile(r"([_*\[\]`])")
+
+
+def escape_markdown(text: str) -> str:
+    """转义动态文本，降低 parse_mode=Markdown 失败概率。"""
+    return _MD_SPECIAL.sub(r"\\\1", str(text))
 
 
 class TelegramAPI:
     def __init__(self, token: str) -> None:
         self.base = f"https://api.telegram.org/bot{token}"
         self._ssl = ssl._create_unverified_context()
+
+    def _log_api_error(self, method: str, payload: dict[str, Any], body: dict[str, Any]) -> None:
+        desc = body.get("description", body)
+        print(f"[ip-sentinel-master] Telegram {method} failed: {desc}", file=sys.stderr, flush=True)
 
     def _post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
@@ -23,69 +37,95 @@ class TelegramAPI:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=10, context=self._ssl) as resp:
-                return json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            return {}
+            with urllib.request.urlopen(req, timeout=15, context=self._ssl) as resp:
+                body = json.loads(resp.read().decode())
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            print(f"[ip-sentinel-master] Telegram {method} network error: {exc}", file=sys.stderr, flush=True)
+            return {"ok": False}
 
-    def send_message(self, chat_id: str, text: str, *, markdown: bool = True) -> None:
+        if not body.get("ok"):
+            desc = str(body.get("description", "")).lower()
+            # Markdown 解析失败时去掉格式重试一次
+            if payload.get("parse_mode") and (
+                "can't parse" in desc or "parse entities" in desc or "can't find end" in desc
+            ):
+                plain = {k: v for k, v in payload.items() if k != "parse_mode"}
+                return self._post(method, plain)
+            # 内容未变化视为成功
+            if method == "editMessageText" and "message is not modified" in desc:
+                return {"ok": True}
+            self._log_api_error(method, payload, body)
+        return body
+
+    def send_message(self, chat_id: str, text: str, *, markdown: bool = True) -> bool:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if markdown:
             payload["parse_mode"] = "Markdown"
-        self._post("sendMessage", payload)
+        return bool(self._post("sendMessage", payload).get("ok"))
 
-    def send_ui(self, chat_id: str, text: str, keyboard: list) -> None:
-        self._post(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-                "reply_markup": {"inline_keyboard": keyboard},
-            },
+    def send_ui(self, chat_id: str, text: str, keyboard: list) -> bool:
+        return bool(
+            self._post(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "reply_markup": {"inline_keyboard": keyboard},
+                },
+            ).get("ok")
         )
 
-    def edit_message(self, chat_id: str, message_id: int, text: str) -> None:
-        self._post(
-            "editMessageText",
-            {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": text,
-                "parse_mode": "Markdown",
-            },
+    def edit_message(self, chat_id: str, message_id: int, text: str) -> bool:
+        return bool(
+            self._post(
+                "editMessageText",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                },
+            ).get("ok")
         )
 
-    def edit_ui(self, chat_id: str, message_id: int, text: str, keyboard: list) -> None:
-        self._post(
-            "editMessageText",
-            {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": text,
-                "parse_mode": "Markdown",
-                "reply_markup": {"inline_keyboard": keyboard},
-            },
+    def edit_ui(self, chat_id: str, message_id: int, text: str, keyboard: list) -> bool:
+        ok = bool(
+            self._post(
+                "editMessageText",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "reply_markup": {"inline_keyboard": keyboard},
+                },
+            ).get("ok")
         )
+        if ok:
+            return True
+        # 编辑失败时发新消息，避免用户感觉“没反应”
+        return self.send_ui(chat_id, text, keyboard)
 
-    def answer_callback(self, callback_id: str, text: str, *, alert: bool = False) -> None:
-        self._post(
-            "answerCallbackQuery",
-            {
-                "callback_query_id": callback_id,
-                "text": text,
-                "show_alert": alert,
-            },
-        )
+    def answer_callback(self, callback_id: str, text: str = "", *, alert: bool = False) -> None:
+        payload: dict[str, Any] = {
+            "callback_query_id": callback_id,
+            "show_alert": alert,
+        }
+        if text:
+            payload["text"] = text[:200]
+        self._post("answerCallbackQuery", payload)
 
-    def edit_reply_markup(self, chat_id: str, message_id: int, keyboard: list) -> None:
-        self._post(
-            "editMessageReplyMarkup",
-            {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "reply_markup": {"inline_keyboard": keyboard},
-            },
+    def edit_reply_markup(self, chat_id: str, message_id: int, keyboard: list) -> bool:
+        return bool(
+            self._post(
+                "editMessageReplyMarkup",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reply_markup": {"inline_keyboard": keyboard},
+                },
+            ).get("ok")
         )
 
     def force_reply_rename(self, chat_id: str, node_name: str) -> None:
@@ -94,7 +134,7 @@ class TelegramAPI:
             {
                 "chat_id": chat_id,
                 "text": (
-                    f"✏️ 请回复本消息以重命名节点:\n`{node_name}`\n"
+                    f"✏️ 请回复本消息以重命名节点:\n`{escape_markdown(node_name)}`\n"
                     "(仅限中英文、数字，最长20字符)"
                 ),
                 "parse_mode": "Markdown",
@@ -106,8 +146,12 @@ class TelegramAPI:
         url = f"{self.base}/getUpdates?offset={offset}&timeout={timeout}"
         req = urllib.request.Request(url, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=timeout + 5, context=self._ssl) as resp:
+            with urllib.request.urlopen(req, timeout=timeout + 10, context=self._ssl) as resp:
                 body = json.loads(resp.read().decode())
+                if not body.get("ok"):
+                    self._log_api_error("getUpdates", {}, body)
+                    return []
                 return body.get("result", [])
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            print(f"[ip-sentinel-master] getUpdates error: {exc}", file=sys.stderr, flush=True)
             return []
