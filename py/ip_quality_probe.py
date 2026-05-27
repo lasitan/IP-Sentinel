@@ -594,11 +594,7 @@ def _probe_curl_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
     probe_cfg = _probe_curl_cfg(cfg)
-    ctx = build_curl_context(
-        probe_cfg,
-        lambda lvl, msg: _log(log_fn, lvl, msg),
-        dns="1.1.1.1",
-    )
+    ctx = build_curl_context(probe_cfg, lambda lvl, msg: _log(log_fn, lvl, msg))
     ua = DEFAULT_UA
 
     _log(log_fn, "INFO ", "Python 探针: 获取出口 IP…")
@@ -643,7 +639,7 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
     _log(
         log_fn,
         "INFO ",
-        "Python 探针: 流媒体解锁（RegionRestrictionCheck YT CDN / Netflix，DNS 1.1.1.1，并行）…",
+        "Python 探针: 流媒体解锁（RegionRestrictionCheck YT CDN / Netflix，requests，并行）…",
     )
     media = _run_media_probes(ctx, ua)
 

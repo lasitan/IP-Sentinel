@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "playwright>=1.49",
+    "requests>=2.31",
 ]
 
 [dependency-groups]
