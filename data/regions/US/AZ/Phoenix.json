@@ -1,0 +1,55 @@
+{
+  "region_name": "United States - Arizona (Phoenix)",
+  "google_module": {
+    "base_lat": 33.4484,
+    "base_lon": -112.074,
+    "lang_params": "hl=en-US&gl=US",
+    "valid_url_suffix": "com"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMiswFBVV95cUxOdzk5Vkt3cWJZWWNQbElIelNUcU1YQVpUQ08yX2lCRVVzNkVWTExXcnNOdFktekRtWk43VmlRNEZHT2NLMGJsTEdqdEZUVk04NkN4a0NERmN3M3FsVVMySnpUcXNVUWRQSTdBN1RVSFRmOUhDRGpRNEJ6OFgweXBUX3h6UENrcUFUbER6MGU4SUp3aXB6ZWxkM1NUZ25CaXN2aVRMeE9aSXNCbW1JcGp4MmpUYw?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMirAFBVV95cUxObS10M2UxaDJKWkhlYWdTd3hCbEZJWHVWdHFQOVRjekNFcFFSZnVSMTBqRy1TdG11X3c4cTRuUTVuMy00UTF4eXg0WmI1dDBnM0VfdTl3MlVJdERVZ3ZTTUFxN0x5NUxuQW9BbUVaM3hULVBYRFA4eTZ4Z2R5VmRPR1dWVDVKOV9lOTFHRU1vekRNaXVJa3VUODdFRzdJbkVYblk2VWhqSWN5X2NZ?oc=5",
+      "https://news.google.com/rss/articles/CBMihwFBVV95cUxPeEp6dF90WkhzazBOV2ltbnpTM3NONVFrSUtmaElHVHVOMDVOb0w3d3VzbnVCdU1sUC12a1A4aTVGVUZ5eWV2bDlFV0NybGdNUk1QdTlIY3JrbXU2VUtUWllJWVBpM0RKNmtXQmRoN0RKb3d4YjVUdzJqLWhYRmNncE93NjRmQjQ?oc=5",
+      "https://news.google.com/rss/articles/CBMimwFBVV95cUxPMks3cnJqYXFzMldfanJxVXRvXzUxM185cHYtMGlqRU1XX0NSSFgyMU12MF9zTm93dXVPUVJUSk0tTDNWNUZ6NkgyR1BxRG1GMmxpalFBVHB4SlZfYk83cGJLTjJnVVNCQlI4SzhJU2pvMDB0NnNIb1ZjaVZzMjFNNEFvRWFQN0pKU0pCQnkydldTREp6aG9fM1ZRUQ?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=66995",
+      "https://news.google.com/rss/articles/CBMiiAFBVV95cUxOWV96bU1VTzNWTU1ENEpMZXdVcVZDWTlDMmdVNGtpd3VZOXdYXzhKTGI1eXB6dzE4RFhmZ0dEaFlsdzZsZ1hoSHd1a251U1BaeEFwT0NQMDdEeFlNV2txSnNhcVFVT1p4WDFhNExlVXJCR3hhLXRieW1tSWUxVDcxaGpkd0Z6Tk9w?oc=5",
+      "https://news.google.com/rss/articles/CBMi2AFBVV95cUxQTEY2Ym93RkdhcVloc1dnbWxpYjFfOTBZNTIxaXFONGtDZ25FOHhISjlnRDA5Tno1M3UwemtleFprb00xSDdVSVlDV0RLQ001YVBXSlhaVWVRVi1NV0ktWGh6YVhrRnRWTGJOdE5NSG9PREU3bjF6N01uUkppOGpEVHhETnJfSGRaT0Y4YkhVaE9wY2VNQnV1UnNGaEdZd0YwVG5UZ3RSbFpNU1V2cHp4NWs5cXdfdXBHUTZrZlhic1BFTzZmczVGZHJvazVHLXNQa21BRktUWl8?oc=5",
+      "https://news.google.com/rss/articles/CBMijgFBVV95cUxPUGVMdnFoRjFHWThkT2FqNVY1NGJTTGdXeWs0TUVPYUc2SzQ3VVltWThUa1FhSEFMWUxoQWM4S3hiZlo4Tm1OLUJkQUpWa0JmLTlnb2did1FQSzFkM095QkUwTndqV0xYWDU4UXU4ZGlSeGxnWE5YVGw3VlVvS2kzMFVnT0x4blo3amdvTlBR?oc=5",
+      "https://news.google.com/rss/articles/CBMibkFVX3lxTE9qUzY0bFpqeWU2MFpOLWlqTnZFQnBmUUd3RzZzN1ZMX0hHaEhELW9zRVJBS0Z0b0IxUEpFbXN3SUNmd3k3RmQxa0NJanZya2lIZkp3alFUU1djalRRSFdUamttSVhKYjhrczJkem5R0gFzQVVfeXFMTWRlUFgxaWtROHNzbVNpN0hVd1E3TGo5bEkzY2pIUDROeVFVNURXSnlVeGhSR3N1Q0F5UGwwV21vclVFa1pvdFNkbnloY194allZclY0YzVCZVZzUlotTEdzbFQ0UmNKaHRCMDk5d0x2cklqdw?oc=5",
+      "https://news.google.com/rss/articles/CBMidkFVX3lxTFA3SWZlV2tFSk1wTGFPMTJlclNETGVPMktvLXgyWHNsQnlqV193NXNqMF9iTU5HbTNCMk1RQk1KMm52QTV1Szc1ekN4S3FXSXkxY3dzMUJCaUtBVkZQVEg5TGh0WDlJd0lNaE1HSndIVjJ5QXh1MkE?oc=5",
+      "https://news.google.com/rss/articles/CBMiiwFBVV95cUxPN1dCOEcwSl9GZDlCM1JMZGhZdFRJNmtHZUROSnpIbjlzVjF4X251YzFnaHJuUF9RdEtkWkN2ckZCMTZ4Yi1fYXJSV1o0MWtkdDlmcGpMSWh6NW83MVJjRk9pNmNfN1BPckhlTUYyWDJMX0dXSFV0dGdVTDhWYmZWM2tNVW5Vd2pTRDhv?oc=5",
+      "https://news.google.com/rss/articles/CBMilgFBVV95cUxQRklHWUxodUJYdTJoTDBhWUpRUmFZY3FrY3Q5b1FqQU9mT1pITWM0aHJ1VFY3YWdrM3lvZ1RzZzhoSmMyMnZuak1vSTF3dTZwTG5VSjFsM2hlV2VWS1plM3AtVDhLT091UTlnS0lzeEMzelpYRmhkMktjMzBBSGpLWWZVbmYzaEVIX0hlRDhWMU44cWRLenc?oc=5",
+      "https://news.google.com/rss/articles/CBMiuAFBVV95cUxOOFZ1T3hLemtzR0d6ZTlJU25GLU5YSEV3eVY0eUV2dm41S0ZPUjVFMWJ3dVpNdmo3aWpxSFE3QWJCdW1NcjlFWTFlcHlyTFhQOTdyUWxuMktSZmtrWnZadU1xQmlDb0dPU2o1dFV3dXVpX29PVDRNVVRNWlV0V1FFb3BlNWVQcUlubDFCQ1hmWUZBcm5JQVkyS28wYnVxd2t0MGt4RlNlOGtCUm9GaUwzUXNVT05CQlJI?oc=5",
+      "https://news.google.com/rss/articles/CBMiwAFBVV95cUxOWEdUZWhaN00wZFhFZlg1VFJRVks0c2RJNjZKRzhzVklIOHF6c01ibklUUkZzS0RWNXdkV0xoMEo4eEs4UkR1eTFxeFJyLWNoelZQMjA4RU16Z0dIcGFweWtwNHJLU3JIVGtUZGlhOUM3X2JvNy0wVkFhby1uSWg4bzVKVWMzWjFFNm1mZ09CYmNMSF93elVJUG1lRlF4MWNtenFXU3J3MlkxT3FrcnlZbnZlbk9SY2Y0Q1k0ck1DdU4?oc=5",
+      "https://news.google.com/rss/articles/CBMigAFBVV95cUxOSmRvRl9YRjBNemlROUY5R0wyUVo2dU1yMzVWUkM2UnNmM1JMMl9FWXBLRUlUQ1NFUHA2RkxUSTIzSzdLRmhsaHFIUE9Bemdkck5MYWU3RmhXOVR5Q0xxSnZHZDhQUEZFMFVUaGFNejFZZmcyZ3oycWhleGpIWXAyag?oc=5",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxOWkI4N0V2T1lIb0Z1TGQ1SFdaQU8tQi1qUDlwdXVYSHdKZ1pPWG1yT3BsTXZDMW9JZFByT1k1OUZZM0NtZ2IzNU50SjF5U0trRnRJWE1VUHN4VVBiMC1vVmQtTU54QnFzb3dyZmcxMTFxMUFtYTktYzZ2NVlkSm1kUGlGbmRrNHcxZWtOM3lSWDFQaHpqcUQtaVFlc2FEVzFMZVgxaDBEQQ?oc=5",
+      "https://news.google.com/rss/articles/CBMikgFBVV95cUxOalFFTVNpXzFCbVIzNGw1VWtNMWVhN3JQQVllYnkwaTNEckpJbWxJVVJWY0ROdUxiT3ZUWUZ3UXBGanVhOTA1THZlc2NqQnVzMDdud1lNR3FUNmhRTzU3RGpGQkdhcnpSd2xQYUxiQkp3RVJLVXk3dzVGT0VvR2s1MmFOeTJOcVNIR3lkRzExaHpaUQ?oc=5",
+      "https://news.google.com/rss/articles/CBMioAJBVV95cUxNdFNEYzc5SU5HVFBSVS1yRWRLTk1mcWdPdGJYa2VncTFFQlU0LURaeEJ0WllsOE9iMGd5LXBFdV9RYmFkYjdQSTBpOG1ueXExQzZYWWh3T1VZNE5BNjY3MHE3TUhxQ3NiMUpCRGI2dHBNYXR3eHFFMmRwZ0lfXzd3Tm1CemhkUTlwRkhYVWVaQnJSWWk2c05qTjdPNU1wWVl1R0MzNUlzaC1reFgwY3htdlhjVUhQZTEyS3paaDNVX21iQ1JGMHdJc0hKM2xEdzQzdXo1c2d1RlBIUW04Y190R2xYam1tYXZhVnJHdDB4WUZSbWswMXhMYkZzLTZBY2dESUVzMFZHVWZwZi1RYk9fQTZ2WVFSMS1HNWN6T21UUFU?oc=5",
+      "https://news.google.com/rss/articles/CBMiWkFVX3lxTE4xWURCMV9KRi16TndiYlRSR0tfNEdSRDVnbVNxNGFsdE1TN2F1WENuOEp4aDV3VDZxb3dFbUFuU0ZWZXZCQTRFSlhwdHpUdUhhWnVrQzVFQVVMZw?oc=5",
+      "https://www.microsoft.com/",
+      "https://www.apple.com/",
+      "https://news.google.com/rss/articles/CBMipAFBVV95cUxQbER0RjNGdlRrOExodkZkUlgyeXBibDFpVDN0akx1M3RRZDM1TUYyR3dnbHZKWS1BQUo1TXFVTmJ1SW5YOTRISlUwM0dsQm9VbzdQTURIWEgyR1NKN29zOV81ZnVxa0ZMdXNYNEx6YUg1WGJ2elNLVl8xOW9oZjI1X1FucG9tMTZNaWVMSVA5Z2pGYmtJalRPRmtZZjBHUWp1d2NTbw?oc=5",
+      "https://news.google.com/rss/articles/CBMitAFBVV95cUxNT1ZheHctOEkzckRCOW5qdW1TZlcxbUVLakFPZnM2T2gtOVB3eHpoc3ZZWWJ0M0d6U3JxU1N0d2Q5UTBNX05kM1BNMUtGX0VjOTU3TE9lY0V0SE5TWm5YLXYyUW9yeEJhblo3Sy1UV052U29ZU2VYVEU4M0MzZm5UeTZNazFvMmZTc2hQMTRYeGpmTzNzOXYweW1tS1BxVDdXTkZxSDBJeFpDWFZ6Y3g0aDlObXI?oc=5",
+      "https://news.google.com/rss/articles/CBMidEFVX3lxTFBPY2RleWhJZ08yNVV0cFl0eUJvU0REcTlveHdCQllxWlc0TlpNUTltVFhZd2t2RkRwczFFV1dvRHJ4QTVCMUNTUkpXRUpXaV9Kc0FFMVlabzFrLWkxWldMNEJ0Y0c1cnlUNGVLbVgzVkw3X214?oc=5",
+      "https://news.google.com/rss/articles/CBMidkFVX3lxTE8tQzFCM0tZTDRNaEFZY2hjLUQ0NHo0MFVKWjFINEFRWkMyNmVQWjNtc3RfdjhmU3NzMjc1TUFuU2FPWnFaWXpOVk9tWnFncFZ0WjNxSUxUUl9fTWUyelZHMkhaRUFnS3c2ZjBsdUZxZ1lxdVViM2c?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=3889",
+      "https://news.google.com/rss/articles/CBMivwFBVV95cUxQVVc3Rm8xRElJZjhnSXMwZ040aHZvQ3Y1b1loVUZXX3F0RkJZRUllcnd3Q2cxdWFsQ05aeVJ5eXYxcHVNVDR1TXBmT3FiT3VKQUNEWllFZ3Q3NGpLaXlGUF9MRkl5ejN0SUxsbGlnbll1N1diYkhmanlOQktwYy1VVnlET3RrbWlTNThHMzdnN1VsMXV0aFRrMHc2T09TQ21Qc0hIUGdaUGJTdUp2LXBkYVRKREZDRm9CSlJOWkcxTQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9jVjBtRTVwMTh2clFFMGNtcDByVWxEUTJ5RG9lZnNDSUdNeWRDRFFjVHR6b2tVaUVNRWxTTk5oUWk1U0VDMUQ2cHVFdnZkRmxlRm82cjBoblBEUQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiyAFBVV95cUxNUUNEejdjTGJRYm45YmQ3Sm80cUN5b2FHSGxfdHBOOHdkVFhDcVpTT29IZ3E3NXY0M2Z0c3Y1VXBUYVd6VWpDR19ONktyNmRiOWhqcEdoVlpwMnpjR2lRMGRQQnJEbmxpOU5KQm5aQThEMWYxeWFpX2JoUEs4NHNoNmJpcGF5T2tQc3c2c0JRRzk4S1oxRU1sQ3JvOWNtZ09lLVp3bnNPZHc1UXRvWVJOelJNdVpDMGh1ZUFxT3VidVhVUGNOeW1XZw?oc=5"
+    ],
+    "static_urls": [
+      "https://www.usa.gov/",
+      "https://www.irs.gov/",
+      "https://www.weather.gov/",
+      "https://www.chase.com/",
+      "https://www.indeed.com/",
+      "https://www.zillow.com/",
+      "https://www.walmart.com/",
+      "https://www.target.com/",
+      "https://www.amazon.com/",
+      "https://www.homedepot.com/"
+    ]
+  }
+}

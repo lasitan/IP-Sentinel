@@ -1,0 +1,53 @@
+{
+  "region_name": "日本 (东京)",
+  "google_module": {
+    "base_lat": 35.6812,
+    "base_lon": 139.7671,
+    "lang_params": "hl=ja&gl=JP",
+    "valid_url_suffix": "com"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMiY0FVX3lxTFA5UDRYZjd4UmFIMnNvd3JEQ20tM1JCNTR6Q2U1QjVBX3B5cURkWUJvSlhRY19vSlRKUWl0WXlvX3F3RkdVaDlVY0RQMXpOUGtfRVVDZW5LeFdsVnh2RXpDaWVJUQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiYkFVX3lxTE1aSXNkWVBMLTN5bnhuRGtkMEg4Z25MM1RWZGZVZXJjY0E5V1pXU2tkN1lfVjV2M3FvUTFtZEEzcm9FR0RaMi1DWlFiRVY1aEZCWDJNaWtQMGJZTXlQcElYNkZB?oc=5",
+      "https://www.apple.com/",
+      "https://news.google.com/rss/articles/CBMid0FVX3lxTFBjMWJJV0tJV21acm02NVRURmFHOGtFdjF5alZ3TzV2MnBjSnZ5d2RxTTAtZjBFZVFDUkpMREduVFFDOFZPbnVGbXlyYjY1eWlRYkx4LW5rQnVsN0R3emYyQ2lkV1l4VDhTQUJiVnZ6Z3J5TDRmZDFF?oc=5",
+      "https://news.google.com/rss/articles/CBMidEFVX3lxTE5ob3E1TzdJdkFFdHZYY0tHNUpGdWFTc01sWDY5bmFzNlFacTdtaW1ObEhBclIyVmRfOHlMelBxeWd2VHdSZFNGQVl5c2NZWDJYaFVjQ1NtbmZIR0p0UnM2eklOclo3SFFnZVFBWUh6eFA1Yi1n?oc=5",
+      "https://news.google.com/rss/articles/CBMiakFVX3lxTFBmX0JGWGtvOGlSdWVCZlJvcGFISFlyT1dzY1BkQlJaeEpmc3FtUDEwUkFOeEZYWFlXVG5rTWExSDFmRWNIT09RV1VlWkNVdzhobllyeFJnTGhFX1VsUk9qMm10WlpoalJzb2fSAW9BVV95cUxQSU1mOUJmZElndEp6VUQ0ZU04TGxCaWFPU0dpVE9HOUlFc0tNVDFHblhpQWNIdnp6NXk3YU4yYThwczBjbXFBUTlxSFdlWmczSmZBWWNxQzdMaE9ZYXpfS3dTYmRxc2hES283R2NISm8?oc=5",
+      "https://news.google.com/rss/articles/CBMiiwFBVV95cUxPWmpTeUpqYWFibEs1RjZ1Z3pDZWdKWGUtbHh2MjJtYU5LeHIxVFQ5RXdQcHZCdUhxV2JZQ1pEdklUS2JDNUNXSzFhMi02dEZ3WjVDQy1wdE5IRUpZSXJaN2pkLVFsOXZ1MXlITy1tT1JrSC1PXzhpR3hta2dOQldKdktHYllnX3dYZGNZ?oc=5",
+      "https://news.google.com/rss/articles/CBMib0FVX3lxTFBVNFM0WXhYMDU1Ni1jTmpLLTAxeWx2eV8zeUZGQ1ZIN0N6LWJvRElnSWx0Q09iWjdDMzVUVUE1SkpzZmkyVHdtYkllNnN1cEIxQlduZ3gydjBfa2VlWlhLbzl6NHdmUHcxZmpWdFJDVdIBaEFVX3lxTE92WTBhVTVIMVBCU0tpTzVXd1p1bFJDZXZ1dDN0bW5WY0p4WEM5MHdzZ0poMTQ0cU80eTNueTF2bERfSTlWcHJKMzY0RjBjQzRTX2JNQ2hjb1ROTzJodnVMcXVtYmlOcFpH?oc=5",
+      "https://news.google.com/rss/articles/CBMiYkFVX3lxTE5qVEdrZTN6aGtuenRPWWE0X0lCRHZMUTNMY0x5YUM2dTVXQW14c1pPc0VtZ0hiZERXVm9fMUJYRFJGX0FoSGwzcnRUQ00tSEFjWGVqVVRBaElraU44VUszemJR?oc=5",
+      "https://news.google.com/rss/articles/CBMiUkFVX3lxTE9UWTc0R1FqYTFNV2VWSERmdlFRS0ZjTFlZQkd0MVdmeXZ5UzAtVFVBaGVSNkl6ZkhZMXRyd1g3U3JXazFSZ1lwRVZJVFhwVnozdlE?oc=5",
+      "https://news.google.com/rss/articles/CBMibEFVX3lxTE9jVEtFUHVOd05lbGVGcHAwYWdBZ3czUHUyMEM2S1Ewd3Q5ZjhHNUlMV2pSMGpjZlVtclgzT1ZjZV85VVlzQ1htWFloNmhpZk1oWV9ya3JCa012eC1ERDJQbkRLc0JlVkYtRy11ag?oc=5",
+      "https://news.google.com/rss/articles/CBMiS0FVX3lxTE1oV0c4QXZSczFTQ1lJaE5fQUtXN08wajFLZWxVbUVuSy1VWjlLOXo2eDRmRHpKMTdteWVIeDNoQmhUaXI5UWtlOFVxZw?oc=5",
+      "https://news.google.com/rss/articles/CBMiZkFVX3lxTE0xcFNiNHhVUUlaVmp6SzFick0yU0FySVlrQl9MWHFDLXN1cWxtdGk3Wk16R1hyRHIyZnZvUXk2cFM0SHB4ZFRyRDNmNm4wbkZpeUhQRlAxTnM5QzdoYmJ1cE5pcUpodw?oc=5",
+      "https://news.google.com/rss/articles/CBMiaEFVX3lxTE42TWFMcFY0dVM3aHZfS1hOUFRsOHBxcTJIamVybkFobFZKT0JaaWZLSjlReDRvZXZnSXFEeE1hT01WYXN1eGRLZndZVWtHNGpnN2x4VEg2V1RqVkxBN0J4SjhQekdJcWtu?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=28800",
+      "https://news.google.com/rss/articles/CBMif0FVX3lxTE9aTzVhcHcxLVhvRzV3RUpaU185QkVwaDJYTXd2NkVIelc3NURLM21iaWVnM1J1VGNtM0VyNzlVNzFfUkJKeVVfSzdQb2pnS1hVMllFLTdZb0tEMFltRUFkaDd5VU9QWXA4WUdkbnQyT1o5R1JTNWNNQ2FLWUdsTjg?oc=5",
+      "https://news.google.com/rss/articles/CBMif0FVX3lxTE5WSl91U3JpNGFQUENoUUJ5TERIUnV4aGhDS1hWQ0VrMEM3UG85a29uR19BQS1SaHl0Q2k5Vy1zM0lkQ3NhTURsMmNIaFp6MkNRZmF0TmVrUEsySWxJS0pPd1ZnYjA5YlczWG9sQ1dLVWhTLTZhbk1lVko3a1FDLVk?oc=5",
+      "https://news.google.com/rss/articles/CBMiVkFVX3lxTFByY3p5VTJsUkFlRTZseTN6azN4a2NpVTJqTGE0RkswV2lmYndVdXJDam5mcXdUc2xTUDFEcXp1aHZWbjRWa2lXaUlyUm9rRDEtOFlIYkxB?oc=5",
+      "https://news.google.com/rss/articles/CBMif0FVX3lxTE9kNmQtT01aUUF1MlVuVmVMUEREdDhwXzc3MjlwQ0RPLVVfRHd1WC15Mm1mbk1VS1VGb1BzQWhWUVV2WXdXTnJJcTNCb3ZjNnpJTWI2cU9zM2F3NTIxbTlpY3RZS1lPNVpIZ2pXWlJhVU1JTEFoUHljS0R0Y3NGaG8?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMid0FVX3lxTE9yWG5fWWtiR0FHc18telFSbmtMUUh0YlFkbGtZc1M5alFyN3lzcE5jX0s4MmIxZlU3RzQwQnVtQkFndDJFREtvXzJELWo0eEV3VzBQM2lRaWZJNW1UY2xLZkc0Z1BrZUx5OFd6Znc1ZTJ6UWpxMXlv?oc=5",
+      "https://news.google.com/rss/articles/CBMiY0FVX3lxTE1XM2ttYmdjdWFwY3ZVT3hycXp6QTZwM05qVWlEMkNHVUlNOERqdnpVc0hBamgxQ3Jwc3lWUVpLZEFHdjBPMjQyWmZ0aXpqR2Q4cUhyNnBqemRTZ2FESldFOEwyaw?oc=5",
+      "https://news.google.com/rss/articles/CBMiR0FVX3lxTE4yWDU5NEhGR2xtMGZmWXUzM0dtSmNSWE8xTWhBRUR0VEVtUUYtOTdXc0VVRTUzNUpRd1pscmUwTzNBNEx0UmRB?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=87689",
+      "https://news.google.com/rss/articles/CBMigAFBVV95cUxPNUt0cS1OMGxKRVZBSDVZVEhyWVZWOFRqbVp5bU5iSW5SVTF3WGRVODlhTHl0VWdWMEl1MHlzclA1TkxJcnYyQWxjSWVid2pRQUIwUkk3M3ExeDU2c2ZQRFZCZXFCUUtPbzZFYmptSVZFNENjUUJyMGdzVm5JOTAwSw?oc=5",
+      "https://news.google.com/rss/articles/CBMiS0FVX3lxTFB1QmV6SDlnMk5qSDdlY21DTTZkWmw4Y1MyenFLRHg1UGNObzZwTU1nUy1OX2Y0aVFWenE1NlFRX1NFQWVGMGFKN3BRRQ?oc=5",
+      "https://news.google.com/rss/articles/CBMif0FVX3lxTE8yRG1sOU1OR2dPa3dCWDg1aVA0dnpuSmdVRFhvSnozbWNFRjg0NGlMZmc4b3ZEQW04QTVIVkhGTjVRT2lDTG1oQ21FY05xVnNHOGFWY215NjgyUzJCTXlTTDl6UTg4ODlqNy1mUHU5OEVOelVRTlVnVjlBeGV0cUE?oc=5",
+      "https://news.google.com/rss/articles/CBMidkFVX3lxTFBlbUlXaE9XMXhZQ21RbW8wNWd2ejNfY0pjZmV6ekNaQVgtUWZySU02cFVXUVZOdXc2U09Hc29XUldMNldpRGxhNzUzY2NfTE54YlR4RmJ5Y0hVSHZYdGhyY285N0xxMG5veWdaZzJJRE1yMXdpY3fSAX5BVV95cUxNLTdnSjhzVGVsOEpVRmttYUpWMFdKa3RYUG9neVJLdk9heDNjVV95UktDTGtYdHh1cUxyd1JsSFpGQWY0eDJYeFlxN2pwNFliX1hvTmhKbVN2MWl2ZTZYcnE4YURFdGF5dDV4bUw5ZVRpVEdXUVpvX0phR0RucFE?oc=5",
+      "https://news.google.com/rss/articles/CBMiVEFVX3lxTE41b2ZFTldXemstSEljTXlHZDg2SzFQVmJOTFFQWEFhaE93dHBMd1phUUVtNWRKbTJmZ3ZDc3JBZ1ZHbVNGOThMM1hhMThTeUV0d0lGOQ?oc=5",
+      "https://www.microsoft.com/"
+    ],
+    "static_urls": [
+      "https://www.japan.go.jp/",
+      "https://www.mhlw.go.jp/",
+      "https://www.u-tokyo.ac.jp/",
+      "https://www.smbc.co.jp/",
+      "https://www.jreast.co.jp/",
+      "https://www.yahoo.co.jp/",
+      "https://www.amazon.co.jp/",
+      "https://www.rakuten.co.jp/"
+    ]
+  }
+}

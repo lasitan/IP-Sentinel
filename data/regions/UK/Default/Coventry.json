@@ -1,0 +1,53 @@
+{
+  "region_name": "United Kingdom - Coventry",
+  "google_module": {
+    "base_lat": 52.4068,
+    "base_lon": -1.5197,
+    "lang_params": "hl=en&gl=GB",
+    "valid_url_suffix": "co.uk"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMi0gFBVV95cUxOcDY5NHhQMkJBMUdnTC1QN2JONFB0ZE9pOE9IYXZEY0I4eE9lVmJ3Ml9JdDhPUHF5VXdvN0ZTVGhwM2Z2UWMzTFJYTDBwZEdReDNCYjJXQzAtTmN3NDdObHd2R2ZURWxHNDY0cDlwcV9HRVMzaUVfLWxTUUpWcXJYel9KSVdmYW9rN0JUMzdjQVJ3enBydUR0S01nRnZldl93WHU4ajRsMU1JNG52WUd2YWtmS1lTc0pCM000MnN2a2d6eDVMaktCYTd4MmwxSmhISmc?oc=5",
+      "https://news.google.com/rss/articles/CBMikAFBVV95cUxPNUphaGVMY1cxNUw4TEFWMHFINVVfUTZ3YURKTjFkTGY2dFEzdDMtQldRY01ySFlMc2hjTjV1c1k4RW02V2VmTzJMbDRCMGxWQy02RkRUYlRNTmlKWC1CeVE4RTBsVTlva1Y1b2RReGJKTGFZZzVxcThNa3VreUFIaHJDR05QWW8xaWdzMEEwb2Q?oc=5",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxQZ3ZsYnVMeEZBQUxWSGprVDhxeGRKekxMeHMycGQtZXpscTVzVmlhRE9uem9XZk5ZTkxkbU83eEtwMzNXczhkQnhfOTB6cDMxc0dRTjdWUWpnWVVpbWNKWjhBbXJlZjBna2N2VDFWTmwwbTU1ajFzblp3REpMM3pqaWZqTW9lNXBkQXU0S3k1cDF2SjNvM29kYlJYd2tGMzJLWVk5RmdFYw?oc=5",
+      "https://news.google.com/rss/articles/CBMijgFBVV95cUxPUGVMdnFoRjFHWThkT2FqNVY1NGJTTGdXeWs0TUVPYUc2SzQ3VVltWThUa1FhSEFMWUxoQWM4S3hiZlo4Tm1OLUJkQUpWa0JmLTlnb2did1FQSzFkM095QkUwTndqV0xYWDU4UXU4ZGlSeGxnWE5YVGw3VlVvS2kzMFVnT0x4blo3amdvTlBR?oc=5",
+      "https://news.google.com/rss/articles/CBMiXEFVX3lxTE52QzBtOVQzWlZiMlJoY0pUdUk2MVdnY3NSSnU0T2RaeW1BMGZVeGVIb0ZOb3hxZEliUG5mbEZKNU1iRUd1RU5aUk1XQWNKRHVUWHF6aGsxMTI3VVNv?oc=5",
+      "https://news.google.com/rss/articles/CBMicEFVX3lxTE5HSEdTS2ZUVlduckpIai16UGFaQzZPODREUHRWRlBNQXEtVWRMTzBuc3ZCQnhub3RtWVJ3dlFqeWJZNUUyVVJtaGF2akhqV3Zjc3FrVm9ZdGJlckxuY2o3NlRSdTR4NDhMa0c1dk5ueW0?oc=5",
+      "https://news.google.com/rss/articles/CBMivAFBVV95cUxOZ1FNNkg5cTZKa2xMQ2tvSWdieG1wT0U5a0txeWY0TVlxd3RGUEt4aVV1enRudHNwaW03alRCN1QwQ0pqNDltUG44bnYyb25QZURILU1hNjBUcHZscWNGZ0dtOE5xeHFMNFZqX0hUSjhUZDZYbmotdjhHbUNZdVloRWt1U1U0eWhHam5zZ1BvN0FWckR3XzBTNnJpY3ZyU0dfNHcxTGtFbXk4RGxpbm00ZzBvNXowNC0yRlN1eQ?oc=5",
+      "https://www.microsoft.com/",
+      "https://news.google.com/rss/articles/CBMivAFBVV95cUxQYUNsTTJ2VllienFYMDhGaVN4YV8wZDkwbEppaFU3Ukg4eUplbFJrRW1pZGJPRmMyTWsyYzJUZVJLVjIwSFc4bllJQ0V6bmJKSkRYZnNEeGtMbGEzTENqblZEbW81TUdLZng2YjBBNmt2YW1kTzlndFV4cHhPYnFBWDBMdEZDSEV0d3VIZUtpNlRoWUNKUjFfVWdjOWY4RVptSEU1YXBweGZyZm12V0dsS0UwX09PeklmV3FUTA?oc=5",
+      "https://news.google.com/rss/articles/CBMimAFBVV95cUxQbVIxMVRQcWphM2pacndVbXRYZHdTS3Vpb2hRVXoyRDFGV0lSR0kyallSUGpmY0JWc3lhV1VDc2pYbGxIbWljaEFHSlpqcXBrRWRJVTBxRm11NWxhemY1OXRUdjhSN0huTEhHNldzMzlJNWhxTTh3UmpmekJGM1Nfd3VZRGlMdnFuNlJiSkI5Y05MRUFka3JEOQ?oc=5",
+      "https://news.google.com/rss/articles/CBMingFBVV95cUxNWWZIWUR1R0V0RFZwMzJqY0ZYNm5ocGgwd2ItVnpzbG1ESWdSNVA3blRXYzJYVGlucmpOWm1oU3RFNXJxNWRmWWIwR2tHZWExdkZZX3Vxekk1SjUycThqOHM2c3ljOGtQSjNzbm1xOE0wQVYweEplLWN4UXNHZkt5QU9VVjVkaUhEbzIyMXh4bUdKdTh0YkVZbzg3aV83Z9IBoAFBVV95cUxPRFJ1SEZlWFBqLWFhanFzSjB5dUZjTjhST3lCajE2ekt6bFlrOVQ3MFN0QWlkc3Ywc2pJbmpZOElUdTZJYWxFZ20ycWhPTGtjcWpFQ0tNaEtBQTZNLWFIQV90TkVLUjROY2N5YUFJSGwwQkZXYWdWUHlheGowRFFjeGFjOU52Mk9menh0cGpPWENkU2NrdW5IZHlpenZld1Ru?oc=5",
+      "https://news.google.com/rss/articles/CBMiuAFBVV95cUxPSmhQT0VuSVM1cjdzXy0yeVZaejF5MExIdVI1U2N1Tk1HaEJDbTF2emhLZmFtNVFhZzNGU0tTSzhiQjFMb1VHQzg0WUZ3OTctOTBqOXRLRDNqOUxKcXJBdFVjVEFPeTVwcE1fM0Zjdi1adTE4MFpObFI4azhZcmp2Y3lVaGVRSU1iSGtIbGJvRUxjekVIRmVObzJMcVA1a1I2NU01ZTFNTk83Z1JhY1lLMFdONVlZQ05B?oc=5",
+      "https://news.google.com/rss/articles/CBMikAFBVV95cUxON08tYVJOVTB1ajY4bE9aWmhmdHM0WWdrR0ZmckNGd2drLTc1SWpLb1B6QS05N1I1RVUwbWhDdjVYbVFVUEV1OXRYVkZoWUhqUGRPclh5aGFaSUJ6YkRuX1lsQlVfT2ZvOWhaQkJPMEE1Y2RoZEtIOWcwQ3ZZZHVzX0RsMzN1NXJ1UEJMcUZ5S2Y?oc=5",
+      "https://news.google.com/rss/articles/CBMilAFBVV95cUxOR0hmTWZ1MndMWnU2TkdQd054UzZXUUJMVFA5Q3o1VGFZNURRbjVRT0xvb2Job1E1ZUgxbDdTZFRMd1RXQnBQa1haMFJQMDVzUHRmZ3FkWjBGRjBUMDhZUU1KSFFxRUEweGpac0x1V3Jqc1hTNlJTMF9qY2ZpRjJ2NV9aQ2MwTENxZFA1V181azdJYW9I?oc=5",
+      "https://news.google.com/rss/articles/CBMiX0FVX3lxTE1RU0lUd3BQc28teGV2dEc4R0VoVHJJUDV6VHd3WjFHYkpzcE5IT2xNNVQ3Q18zb09jZ0RydjhkQzdPWWR5VkJ1MS1OQnZzSHVYMlJ4cVN2OGdSRVQ1cjBN?oc=5",
+      "https://news.google.com/rss/articles/CBMitAFBVV95cUxPbzhZRERkemdPZnJEQlhwTVlaenhwckkxTmduT3VLOUVERkNCbnhZQ05vMFllY3RqRlZnM29rU2s2TXkya054QlVpVFg2X2FNRkMzc0dSXzhOZF9yUW82bDVMWHQxUzRUU29tZXM4M191bXlCVDN4VjhyTzdhcDNXaXU0TnZqMGkxMWdsSUE5QmtiY1oyMzJGdVQ4bzkxQmtPMlFMRU1jVHVPRGRVLVd5Q1NYWDTSAboBQVVfeXFMTlBja25EV1dEWEdhS3JrckoxTVhocnZPRV9FemZ0SThOOVNDVW9ZVjNKVWR5VmJoUTZtcTJpRHdTYzFFbUtKVjdBQ3hHRWktUFZhZ2dsM1hFaWMxQWhpV2ZsRVVCWjNFQ1VVaDNaY2RiVEhZd0huSC1rLUo4bnJzUW9ZeUM3ZGhndTBweEpGSXpUNmxDYnU3SE1TTzY2SDFRNjBqN1B3a3Rfc0d4S1pnLU8xVEl6allEekhn?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMijgFBVV95cUxOV1hqWW1YWWFQYzJXcE9hLXVXY3dmaU9vYnJSdUZ2MWk1a2MzbjVRa0JrcXBsVEtOS1pLbEVOeWZXR3dQZXI1eTlHTGtwTnJrVjg3TDdLd3g2bG8zRVhVSnNKS3ZEZ2dPbFJpLW9NUkNlb3FtRl8wR3U3a0ZRRDEtLWpmNzg4NFl3MVZ6MXVR0gGTAUFVX3lxTE9KUEFtYU9SS2Zyb2JPSUJndEs5US1tSm5FWE1JOFF5bUJwSlZpcWZaTlVmR1NnUTF2bG9YdFctTnBKV3ZWTUxsT0h3T1U4LW5yWGM2NUZwNXd4d2l3bkRCTHA5cnlRaW9DYzhxeS1jcTE4MDBnZ0g1ZXNybTZ6Rk9saHdZWUN4ZGlVUklGeXdMV1VvNA?oc=5",
+      "https://news.google.com/rss/articles/CBMijAFBVV95cUxOUG9CamdrN0plbzdCMy1SZjMxTTJsMU05VmxhOGxidHd6SlBFU3RNYW50WVpidW5SWlZNMjByaVhGdWdDdUhFLWJIQlBodFRBRlRkQS1haTlqX0JrdjJ2cVNmWTNySUxmYjZMekVuZDY4cUc1Nmw3Vzd0YmplMGNIWUhmdDlaODVKM3FuZQ?oc=5",
+      "https://news.google.com/rss/articles/CBMijwFBVV95cUxNZFpEaGZfNFFtYWhKazl3a1EtYkp3MVI4TUVSTnM5UkJxQVhYVktXa2p1VTM4TVJrci1FT2wxZEctWklZSmhmLVJIODA0bWY3RERIdFBuLUZoM2hCZ0RiZWxQUFcxM2RiTktHaGZEUUxhMjdJaUdSajZxdEsxbjdlTnlZQnNCdUpIbmNUN3M1MA?oc=5",
+      "https://www.apple.com/",
+      "https://news.google.com/rss/articles/CBMiZ0FVX3lxTE1hYjJYZWJPRXFILXpEWHVQRlF6QlJycnVRRkNXNjVHOXBDYV9ra3lTSExyWXpSWVZWZlJQRWRZNGZJSDU5NU80ZWhvaUExcEFwSkZGLVpEQW51ekdkYklrOUFGb25VLXM?oc=5",
+      "https://news.google.com/rss/articles/CBMihAFBVV95cUxPZ0pkUnFDMHBXLURUTWxvMmg3SktsWEtzWTRueUQ4Qy1qelU2MVNUaFNHRk0tSmJudTFsT0lrdnk2RG9OUUFiYno5a3VUU3VEbEg0amQ1Qm1vYUF1QnB3WFJXOXRWVE5QLXBXWEU3MGhXZEE0bjgxUHQzMVZuaFZIdDFhcHM?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=31995",
+      "https://news.google.com/rss/articles/CBMingFBVV95cUxNdm1hcWo5REFab1d4QlphUXRvVzE1ZWlQVFJDTGtBMDJYUkVwLXBRSFYxWnN4T2Rtd19mTVhtc3NLakdBdllfV0xqY0tIczBBRW1rWEtaellSOXZVZEw0M2dtb01fb2hFV1lhX1VpcEhyRGVXbTlyM081enp5T0VIVHpZSkpybEZ3aEFLZlc1clNqRWNNQXR3M2QtbnFFdw?oc=5",
+      "https://news.google.com/rss/articles/CBMiqAFBVV95cUxQMW1BSFExdGJ5SjdSbVJJV0xydE5rd2ZreFdUN3pkc0V3VFdkX25nTXpoZjdGVUFzRFkxNEFqMzR5cUlCeVRsdk9xQmhTZ1VVZ2JtUmVDalZnMDIwZTJPaS1fTW1WTXRPSlV4QjNYajhyRUFLWHd4ZVlJc0JoUzNlN3B4ZmZ3MkxFV0lNeDlZZ3d2MUJmaklicTdlNHBoS3Rnd3JPN25jbWQ?oc=5",
+      "https://news.google.com/rss/articles/CBMigAFBVV95cUxOSmRvRl9YRjBNemlROUY5R0wyUVo2dU1yMzVWUkM2UnNmM1JMMl9FWXBLRUlUQ1NFUHA2RkxUSTIzSzdLRmhsaHFIUE9Bemdkck5MYWU3RmhXOVR5Q0xxSnZHZDhQUEZFMFVUaGFNejFZZmcyZ3oycWhleGpIWXAyag?oc=5",
+      "https://news.google.com/rss/articles/CBMiXkFVX3lxTE4zanpOaVU3ZVZvZWxmTFluY2J3T2JCc3BNc21hOVVHOFZGZDZOdy1feDBnQjFXNldtWV9QTWxXWk9pVEpRcksxazE5YXdCVDl3TERlM29qaWZVVXRiNlE?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=55415",
+      "https://news.google.com/rss/articles/CBMingFBVV95cUxQMFM4eGs3bDBVYjhTNGRZd3dzVUlMNUdMSUZVbTZsckdiLWk1YjNfdWprS2ZLSlFkSlFXLUpRNTRfa2VQeXdyOXlmc2RWamVLZUJITmN5aW5VVVdkRGhsYlpJVkJpSEVHUlVCSUtja0pfOUVfc0U3ZHBNOWczd0kyY25IUy1xSU5VbHBzT05NeVZZY1NfdWl4T3ZUS1JQZw?oc=5"
+    ],
+    "static_urls": [
+      "https://www.gov.uk/",
+      "https://www.nhs.uk/",
+      "https://www.ox.ac.uk/",
+      "https://www.barclays.co.uk/",
+      "https://www.postoffice.co.uk/",
+      "https://www.nationalrail.co.uk/",
+      "https://www.amazon.co.uk/",
+      "https://www.ebay.co.uk/"
+    ]
+  }
+}

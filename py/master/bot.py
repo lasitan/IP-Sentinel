@@ -1,0 +1,69 @@
+"""Master 长轮询主循环."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any
+
+from master.config import require_master_config
+from master.db import MasterDB
+from master.handlers import MasterHandlers
+from master.telegram_api import TelegramAPI
+
+
+def _extract_update(update: dict[str, Any]) -> tuple[str, str, str | None, int | None, str]:
+    msg = update.get("message") or {}
+    cb = update.get("callback_query") or {}
+    cb_msg = cb.get("message") or {}
+
+    chat_id = str(msg.get("chat", {}).get("id") or cb_msg.get("chat", {}).get("id") or "")
+    text = msg.get("text") or cb.get("data") or ""
+    cb_id = cb.get("id")
+    msg_id = cb_msg.get("message_id")
+    reply_to = (msg.get("reply_to_message") or {}).get("text") or ""
+    return chat_id, text, cb_id, msg_id, reply_to
+
+
+def run() -> None:
+    cfg = require_master_config()
+    master_dir = cfg["MASTER_DIR"]
+    offset_file = Path(master_dir) / ".tg_offset"
+    if not offset_file.exists():
+        offset_file.write_text("0", encoding="utf-8")
+
+    db = MasterDB(cfg["DB_FILE"])
+    tg = TelegramAPI(cfg["TG_TOKEN"])
+    handlers = MasterHandlers(cfg, db, tg)
+
+    while True:
+        try:
+            offset = int(offset_file.read_text(encoding="utf-8").strip() or "0")
+        except ValueError:
+            offset = 0
+
+        updates = tg.get_updates(offset, timeout=30)
+        for update in updates:
+            uid = update.get("update_id", 0)
+            offset_file.write_text(str(uid + 1), encoding="utf-8")
+
+            chat_id, text, cb_id, msg_id, reply_to = _extract_update(update)
+            if not text and not chat_id:
+                continue
+            handlers.dispatch(
+                chat_id,
+                text,
+                cb_id=cb_id,
+                msg_id=msg_id,
+                reply_to_text=reply_to,
+            )
+
+        time.sleep(1)
+
+
+def main() -> None:
+    run()
+
+
+if __name__ == "__main__":
+    main()

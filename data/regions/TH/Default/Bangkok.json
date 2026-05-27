@@ -1,0 +1,50 @@
+{
+  "region_name": "Thailand (Bangkok)",
+  "google_module": {
+    "base_lat": 13.7563,
+    "base_lon": 100.5018,
+    "lang_params": "hl=th-TH&gl=TH",
+    "valid_url_suffix": "co.th"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMiS0FVX3lxTE53eldMcG96czNtWkktVE1FRGo5MzEyUzV0YTFsZkxyTV9ncnRzQU1MU3hjaWhzMW9iWG1YZHplUlhOSUZIQlk2dmdDWQ?oc=5",
+      "https://news.google.com/rss/articles/CBMinwFBVV95cUxPWTZ6ajRNS1N4WUx0Y08tNFhhNUp1b0JvVkcwX0RxVjF0alRPSTB2Rk5hS1lVYVlQZURjYzNXclpKZnNJcS14dHFsQVN5cmIxbHpDNHR3a1hTaG9CbEl1SEEzeWZMdkExanRtMG9sX0R1Ty1ZSDdYUXdUZFRodDhvSzJrM2tzdUd5a2p4TVE4N0VrQ0ZULVhNaFVKLVJNcGs?oc=5",
+      "https://www.apple.com/",
+      "https://www.microsoft.com/",
+      "https://news.google.com/rss/articles/CBMiSkFVX3lxTE1BSjFDN2x3cjk5LVh4UTY5TXVwZ1dld1pJN1lUQ3hQNUlKWWFMMUtFb2YtTkY4bkw4NkdBemJNNTJqWjB6c1dXbXB3?oc=5",
+      "https://news.google.com/rss/articles/CBMiUEFVX3lxTFBHX29wMUJDbEQ4N000Ym1CdnpvMzZNQlMwOFA2WmI1ckNjT1lCcWJuS0hNcndzemFwcE8xcnZOeUNIaFJwY3IxMHRiRUlzOUQ4?oc=5",
+      "https://news.google.com/rss/articles/CBMiXEFVX3lxTE5iUi1Ma21VQWlOS1REelh2bF83b01QLV90T05PSU8tNkxtdVlXcFducGdodTlkbDVLUzltNUZJREhSal95UkpCODd1THBQLXJvUVg4RDE1YWh6TTUw?oc=5",
+      "https://news.google.com/rss/articles/CBMiW0FVX3lxTE96aE5GM3lDM1FWSUxNeXRlRDk4Zkg5d1JvWXYwRExkX0YxRi1IRWhXOEFxZzZGT2ktOF9UdkxIMjRuS3pMSXdyZWt4Y3lpNXVaX1IxRHpxTjZ0eEk?oc=5",
+      "https://news.google.com/rss/articles/CBMiV0FVX3lxTE9SWklLVnUwTjdPZzlobGtNaHFqMnBHMWh1TDBtamx3a3dReF9pQkpUenRfaTYxMXFFcFhMV2FDYVFKWUFnUjZ3UEhVWjl0ZHlCejI2VVYwWQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiXkFVX3lxTE1tYVRNajByaU51VDFvY0RpU256NjVHOHp6VXhpUEpRNTI1eWhtc3JjMFVEUlVBalN5YjNsV0RHLTFmd2I4TFlKMXFOX2NTNGgyOFF4azVPY3p4TG5mSGc?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=34648",
+      "https://news.google.com/rss/articles/CBMiW0FVX3lxTE02LUxPMHVIclJKeGdlcXZpcFlaYVdCSUpZVW1TaTIyVXRqQkxwRnk0S090M3g1dExLbXVjbTVzSG9Oc3VVTm9NMUw1ZEM0Z0xlTENEQTlFS3JOZ3c?oc=5",
+      "https://news.google.com/rss/articles/CBMiY0FVX3lxTFBNRXIxdi1uRmhGbHBOME12S2tYWHRnQkpvLU9nWlZuWkgwY3VYVzcyNDR3NmZUQURkbndkMlJGMmVUNUJoRkcyLW5PWEFqVVEwMVdlVzJfZHRIa3d3VTU3aEJNcw?oc=5",
+      "https://news.google.com/rss/articles/CBMiiwFBVV95cUxORUdmWnVjYlJ4QXFRMTlaaVdJVmxSOGYtbUM0cmhtRVRBV09SYVFobVE2ZkJGOXFheWNPNHptQ3RIR2FDSjlSdGp1OFBPN09zR0VqZ0tEU2psYnJrbWtZSU04RWJvLXJtSHpzbzgxSzRKRk5IWGxiUHAydHp6Qm1IcWJDQnh6MTdtZ2tJ?oc=5",
+      "https://news.google.com/rss/articles/CBMieEFVX3lxTE4zbUxOMFRoOGVzZEpKaGpzc09IcVlpT20wT0poSS1qeUFibzZCaEZKT0xDQ3Y4a2xodmtWVkxQTDlJeDkwNHJiaHVUbkZVVkdiaWllN01USkdmeVE3MFRqbFFCNUVlcXlQaDdVdjlCTEFGN2VpUUFPTQ?oc=5",
+      "https://news.google.com/rss/articles/CBMidkFVX3lxTFBmY1gwcGlxNDVyRFZxOFNtZFpsaHhjc2hVQTYweUxmWl9ENEN5V1lOWXdSNG1ZSTFLNGJzNDNnb1hhSnNDLUd1ejl3enBpdHpjQ1pNaWNLbVllNFNqNU1lMWtfZHJDQWpjbk93NGZlblVUNHRDR3c?oc=5",
+      "https://news.google.com/rss/articles/CBMiZ0FVX3lxTE9TZWUzVk1Ka0ViRWs3ZWttNXh6SU9QeG9jaHdtRzh3UkRLeF9PZGxici01UE15ZGRTWTFTNnRWNmdLUHBTMnYwM1MxdjNrVTJCclZ4UldSNUIzNERDSXJ3UE9MQldpTVU?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMickFVX3lxTE1YY2EzOUo5dFFoZ1NPRzVYX3BhZUY3OGFzYU9jb1RGXzU3YlhianhIRzJjWmYtdmd6QmZLaGlYXzhVS1hadUxlOTBWSG5Dbkd1NUJZZmw4enF3MVRaZTZPdWY1R05PejFNaElmZFdJRUFlZw?oc=5",
+      "https://news.google.com/rss/articles/CBMiW0FVX3lxTFB2SWNxcGVlSmFKcGVYSnlTYzlLSVcweVZiVS11Q2JUN0hGc1pRVENaT3dxSE1Jcm9DVmk3eUxpZXBmTEh6c1hJMUNFalh0dUtDbWlVUGxlTlpvTjQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1Xd3d0NE5Bbmh5VmZ2bHFpM0VxbDVrMGZmSnp0OGFCTXVuMW1jbVE1X3pVMkZuVmpnaWx5ckVpSnV0QVFVSnBKaVhsNFdSYTBFUTNvTENXZEt5ZjA?oc=5",
+      "https://news.google.com/rss/articles/CBMiSEFVX3lxTE5oZjR4WU9IbXBfV1lDcjhwdHhKa0M2dnZyRldPN0pTaTJZQlR6Y0dfdkpEbm1JN25CcnBwbmsyQWYxM2ZhMV9adA?oc=5",
+      "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1yaUJIQ0cyZ1BmZ1F0RGlxN3MzMWNXdnNLZDFFYUZpQjU2VVJOb2xqVWpjdXpUTV9ZQ0VDYVdWdl9zN0s4NjM0OFAxbC0ybWNka1N6cUVuOTcxd00?oc=5",
+      "https://news.google.com/rss/articles/CBMickFVX3lxTFBXTW11dGNHY0M0UzRZWlluVEVvTkU3Z0JrWmxXUlI0dnBQQk9ULTN4UHNZZVFCZ2hqZlhNQUlpTUN3YVdLYmszQ2ZKODhMcHNSV1NxVXpWTzdieG5PZXdrZUVnSWVMYWFDOGZHZGFpeURmdw?oc=5",
+      "https://news.google.com/rss/articles/CBMixgFBVV95cUxOY0R5d1A0ck5EYkU4bFJQUG4yU1ZTaFBxZUpjMm9tVGVwS3BOX3p0QUVjbVAzY1Fxczd5WkR3c3RreHJab0RmYUZyMmVjMUEyblBCN1Z2OEI5WUNNRGJlMzVHZmJlNFpUdWdyZDVva3Mwb2NqbFpLYzRzZDFwTHI1NjhQOHB5VFF3UjlIQVA4ZGsxY3QtU3k3VnRRSFUwclAtbGJ5Y19QVmp3dm8tTTVCcm5VM3dkVTV5aERCY3BmZkIyT2ZDTWc?oc=5",
+      "https://news.google.com/rss/articles/CBMib0FVX3lxTE5WcTFaMGRlYWpUdXhVUXVZSUdwaDdBTHZ4a0V2NlAtWldOaERwZ1VTM0ZwVEF4YUU2SEpqbzgwSC1WcnhlOTRxOXlRcTFNOHVCWldWTkVjWDJzRjdxTDhhYzRPcUczLUs4NWFtOFJLdw?oc=5",
+      "https://news.google.com/rss/articles/CBMiekFVX3lxTE1oVkZQSmJFV1hKcG9oYy1EZ3pjelhXMlI3TUdjdkVReWthWmdsQ09sVzZiWng3Vzk0ZDh3dkhNTWRJRlhuNW12Nk5qSHpack1DMUFBbVNtbERUNzlLcnI4b2VfOEZLZlVOeU1CNmdGMkYzc05IVzJMRW5B?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=54034",
+      "https://news.google.com/rss/articles/CBMiZEFVX3lxTE4xMUdNQWxDZ2cyY21tZVpNckdoZUF4UUpDa1phTDQtb2VzWnhaSWVLcklzTi1PUXlRRDJScVVQU0pXSUR6NURWTE5RS0NDaDlaMjNURGdreUFRU191TVkxVTdramU?oc=5",
+      "https://news.google.com/rss/articles/CBMiV0FVX3lxTE45TWY0LUJoTlhTbWYzaS1zazBqeGprVld3NG05bjlKRERYS01pOG5tWEt3TEJ1Q0laeWtZRDFneDdfNzF3NUJNbG1rcVhQc2J1LXNuTjRDdw?oc=5"
+    ],
+    "static_urls": [
+      "https://www.thaigov.go.th/",
+      "https://www.bot.or.th/",
+      "https://www.set.or.th/",
+      "https://www.bangkokpost.com/",
+      "https://www.thairath.co.th/"
+    ]
+  }
+}

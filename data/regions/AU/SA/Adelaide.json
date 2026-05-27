@@ -1,0 +1,55 @@
+{
+  "region_name": "Australia - Adelaide",
+  "google_module": {
+    "base_lat": -34.9227,
+    "base_lon": 138.6016,
+    "lang_params": "hl=en-AU&gl=AU",
+    "valid_url_suffix": "com.au"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMirgFBVV95cUxNLV95clhidDN5QThwMDJyZ0dtYTg4NlhxSkRZOHhIRG9VaWppcnpVeG5BazFsbzZ2azNaOXl0MmU3Wm5KNlNFWmVlQXd2MTVhSDVhQXJOYW1ldGJxLThBUU9zM3BXa1B6ajVMamctdmMtWURZZW1aZDVueGtWbjQxRGtiV2I5X0x1Ukp5WnAtc1pnc2dNQXByb0lvdlpELXBFaFBuRlJaMlNXZkZGa0E?oc=5",
+      "https://www.apple.com/",
+      "https://www.microsoft.com/",
+      "https://en.wikipedia.org/wiki/Special:Random?r=71083",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxOeG96VUxTRTRrOWJxLVVNZlFsTl9IejNPalJEUms2Q0dYSWpGb3BKeEgxRHdOZEpENDVRRW10ZkVPYjJtU1NrLVhYTE10cjlzTm5PVk9UWTdJUE1GSDRzcnBDQ2IwdHJYOVlCLVhUeG5BTWJkNG9hQ25FUDFDX2RwdkM0SDhOY19VWVZfN3E5RTlJY1VJZVNUdlNKSEpNaC1OYVlHaEw1UQ?oc=5",
+      "https://news.google.com/rss/articles/CBMi-gFBVV95cUxPWmxBZm5xdloyUnFXeERIWmJpZ3hoRHJRZnU1ZFRFTjNKVlRSSF9QdlNxYmhzNjlneFdqS2lXbnBFQWpuLXgzdUo0MVd3RmZYb084eWlLMlRSM0xrM2xXZmNyRnM5LTdhYk1HbmtwbzA1U0xwTjdRU3VHaVlabEVwREpUT29OWXR4SEdxYmY2bGNib2lYbGFsZkVUbUJsTTF2WFlqclItdTF5cmNsWGJvRTRrNUVhTXR4aGl6ZWVLb0V1ek1pMXpJVzRrS1dsU0RvSjVoMkRfZTU3WWdacUk2eEJVU29xSUkyTGJFUkIxRG1zcWtKOXoySDJ3?oc=5",
+      "https://news.google.com/rss/articles/CBMimwFBVV95cUxObDFfa05RaTdTejZQYXJ0SDdPN3hlaUdoQ0tfWXUwaTdzUk5iSmRUcks1eHZucTR5dUQ2bkd5LS1oaVd2QlpTNjRCaTR4RWpxT2pTYlRoVXFJQjR0dlVzSllzbG80TWVDSlp5bUY1anY4YnhxbW1udkxiQ0lxSTlNZVlMX1JwWmwxcm5HNGF6dl9yMVZRVlp2WmJtbw?oc=5",
+      "https://news.google.com/rss/articles/CBMiekFVX3lxTE9PcjJTWlRzc3RfaEQ3Mlg2Rk02X1NoMkxVT3Awb2ZpUFB5cFdPWjFHRG5RTUEtTFh3T2lUUlUyWXN5RktnbC1RWXNGVWtwNlhVdkxmZWFyZ3ZKVnQ4ak9sVzg0LWlrSUFXS3ozSTZ3clE3MFhDUzJsVXBB?oc=5",
+      "https://news.google.com/rss/articles/CBMivgFBVV95cUxOUmJoalgwaWVmazFqVk12Tmd3X0d0ajdVTFk3VDNwcjBEbFo0RVVFNWFHb2FwVUpkdUtSUVFPTFFrUWpWMXN6a3d3aEVyeTlUU2FSODJxR1phZS12OFRLc0pTM1hzaUd1MGNJN0dPZWxqaHhPcnlTR2FBR3VWcW5oY2pBZkZQS0ZSOGRrT2ZoTTJUaDk0UE44WktuTFkzQ3g2WXBtc3BYT0I3RjZzWXM3Rkg5bmg0T2tya2V4Z19n0gF4QVVfeXFMTlFLTmFVYjI1Z1cwbi1fRlRFaGRndWR3TzAycnJ3Qm5YUXB1QmtWbmlLSm53Y2tZaERLcDdlMml4RTlMdnNqdmFwNGZEcTFXM2QzelNQRXJYT3lER3MwS0cxcmpzR1h6RElWQUpuNHFXM0dlRExHN2FM?oc=5",
+      "https://news.google.com/rss/articles/CBMipgFBVV95cUxQZGExNjlqS0NaM2ExVXlKX0x3M292VmVIYWNxN2tBWjYzbzFfTm1PRjBoeFBDS1JuU3o0UlVVMGpoel9YNElSQlg1cl90Z1NwUTdJUTB3WDBoVEZod21tZGx1UjRNenY2OVV6MlNxejE1TTF4YzZ1aGxHYm9LWDNlYzcyZnVKaWdRTjlVeEpPYi1wVmJoMXlLTnZlYnJfRlB1clVuZURB?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=17094",
+      "https://news.google.com/rss/articles/CBMivgJBVV95cUxOYjNBUE1wWXFOX3EtOFZ2a0VNX0xLYWdjQk8yR2Y0MlQ3ZGdUS1JuVDdTbjJUcXpKWWNFSUswTHc2Z3lmdzhUS251Z0VIUEVvM2FhUnQ4bnNTYnNnbUxKTzBnbUtjeHBtaWxJbUFSdGNTcWZMY3RadVdkOXkzT2xsaU9HdW50dnp5QlVoUy13Wk1mMks1cFk4eV9rdnhqZmo0OXo2Sy1SZE9OTEprajh1VlM4VjMzam1ubE0zVmJ2NE1SemthQl96R2JiNFFvQkZjQ1JzWWVaeklsemJJUklGNno0Yno4YUhRMk1ZUDhDSlhtcW9SVEszZTYxQzBlUDYyQWtDbFJ1aGhabi1Kd1MyMV95SHk1ZFlkdGtCblVNYmJGbmNBdEd5UnRXZmVkdWNWM1BKN3FNZmwwM2dxY3c?oc=5",
+      "https://news.google.com/rss/articles/CBMirgFBVV95cUxOLXpicHlCSHVDZ1JLRHVpRTgydWJSVlRfVm9qRUZZWkxIR0hFOGNVUzR3cG9JNnVZaG1GRkZFQloxSWxaTEwxLXJ2SWpZaVBybjZPdktmQzNyMGxWLUpwTHA2YzdjZm9WcE5rMXJMaFBHQUZtakpkWndRRzJiaHVZTUJhaGQ3WE1mQlZ0UzZkTnE3aHZhNHJUSXo1enVZcEs4MWtSSk1uWDVGOE80Ync?oc=5",
+      "https://news.google.com/rss/articles/CBMi0gFBVV95cUxNZmVLU3VBUllWWEkxVkdOQm13SWEyZ2VXczVhWUZyUUpraTdjUlVlTjhocEpuOFFKTnU1NkpJazk4TkdGNWZVRXdEbGxSNDAxNVlZT1VkdmR4NmxZc3pQLVZ3UENRWjdMaDVfd3IwOVhkRjJjRmZLQmtfejhyYXpKbkJELXJjTVcwX081TDNUWE9CekRDVjg4VmtOb2lTX3dUX1YwWVdhNEg4MW9nYkJQOW5TT0hYWkZOaUw1T0J0cEd3R0RjdHdYOHZvWmxVM2t0Q1E?oc=5",
+      "https://news.google.com/rss/articles/CBMihwFBVV95cUxPeEpzSGNCR04yOVpVV3pySDVjSjZYcUoybkFTVnFLaXdiSFJ5ampLZWwtTUROYko2bjVlVVExOUVtaU15LVgtc1hyWThqQk1EMmtCMzQ5RTlGUnd3NGUydXhoNC00d3c4MHJacnJFTW5EdWVlSDVjYVA4SVktSFB1Wk1qWWM2UFE?oc=5",
+      "https://news.google.com/rss/articles/CBMimAFBVV95cUxPc29pMkhyNFlIa1NtUFEyLWVMNFRvZ0g2Z2pxb0g5bzZadlU5cDFjYVBoWkp3eGw2ek5hWFFYdFh4bkstNmtVeFJWNG9PTDBtY0hTVENucHlfZlM0b29tRmpWZlJ3MnNVS0RaWTk4UjMxaGp2SG9uSkFidVFuclhJNy13eEhrUHNmeEhkb3lSMzBIZ1daOE9vag?oc=5",
+      "https://news.google.com/rss/articles/CBMizwFBVV95cUxPbFB6VHpWUFRobXdRcGRWcWhOcFVzUkFLQ2psMzVsdDZoVjVheU1ZeHJ4UF9UMll0eUhneHFCUXFYTDJNRGszYUtFSEV4SlpiUmxWM3JRck05bUlQTGE1cHoxX0ZyalJuS2JoQm1pUF9sSGZxNUJsY1lzZDdaUk5sN2MxaFlGaXZCUnR2dm0za3Q0djRTcll1dFlGaXlXNnZ3THREQUNmbmJFejRSXy1TSWlFS282bHhzQ0ZxXzJCTFAySGt2dk5CSFhvMnN3MDQ?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMivwFBVV95cUxQelpldWJmdnNLVDdPc1d3U0p0YUV0NmhQSmdEdHR3SmdCSXgxSzdtT1dUMFB0THVKOXFiT2NBT1lHMlRUWFNtWnFrRGZjMlNEcEVRSjRvZnF1d3ZmNlowOGFVNGdpZXhCby1JUEZTWmI1ZGlJQmJHWUgzLWllNFpLWDdoeTUxXzQ2b0hXalZXM2Z4MEF0Z3dmVThnd3Q0ZzBEY1JnT3BzNFRnQmhkVnNMdkh4dEhMOWNVWXN6S3RzVQ?oc=5",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxQYW1zQzFZT3RlQXYtc05aak9ycTB6WnlZVmhBT3NWUDVLUTBDaV8tTllNRVZHOE1MdE91ZmpQN1JXNmxpMjR0MUZaVDhGMEFuV05tZ2Y2NE1PYWs3ZHFRRTVXbjZTR21EOVZvNExPMF9Rd0lpRGZvS3UtNkVVRGZaZHBUQTQ5b2s3N0x0SEFTTkZMVUlZM1AyQkFHdER5bmRZOGd5SDZMRQ?oc=5",
+      "https://news.google.com/rss/articles/CBMisgFBVV95cUxOcjRiOHU4di1LaXNKYjk3WXFwbGhqLTUtWVBuTnBNeVhDbkFvSjdsUkdVcHN1WDgtSmZKYy16U2hMQmxmOF85YzBhakVDYU9XdW8yQXdhaDIwRWhkR1M4amVsZXkyTDlSVXdGcnJaOTczdmU1a0N3RVQ2UFVVQ05OTmtHY0FXRnh6cjR4NGM5TjZ3VlByYmdHdjRJMWNJcGJKVDAwZkNGMXVCd0tEWGlIeExB?oc=5",
+      "https://news.google.com/rss/articles/CBMi7AFBVV95cUxPSWdiTUc3TzFaa2g5T1E3YXI0Q1FLX0tHTVFlaFNCcEFZbGx4VmVGN2p0NVhvVU1PYVVyNDNYNkRWdlBidXViRmVSQWxPYWRLTVY1VVRUWWZBZ0RyOWhtTTZqZVNiNU9QOU5FM1JMXzhzZDFFRjN5czdIWEVYZV9MWm5RUlBLcV8ySUtlSlBtcGd1VkZIX0E1NGl6ME11aWVxbmpSbXdWeXp0amV1N0ZkRmJXR1A1bE9PS2hYSUpMZUNWREhZVDRaeEZHdjYzT1FDOS1zZWJVS05uTUVDUXdPclZpejNpRjBSYjhkXw?oc=5",
+      "https://news.google.com/rss/articles/CBMihwFBVV95cUxQeUMtc19lY2dsbTl5VDkxRmhtU1VqTE1XN0JlSUo0WGJDeW9ycVpqeGtCc1FZYkZtR1l4OWNPUUIyY0pkb0FjNV9DQ1doWEViRHJOZWw2Y1RlekRoTTFpUGxTVkVWYjNldVBieWpreVFoUUJQSDNYU0tkN2k0Q0ZpWWRnOHJXY2c?oc=5",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxPbktLelkzQnBuUG8xX1VULVdYSWVBX3hnN3JGNEcxZWRGRDFsZTNHZFFqSnpyRTV1N3REZzJIeVdzeWlYRER4d1NzcEd2QWd6dWg0LTRFLURUVlNNYkhMOEpXWHNKREQtUi1aY3ZjQTJNdHhMVllTd3p4ZVVEQ1RtbTlXeHFRb1Fxd3diWXRMaTlZTnFia2N4MkZoUHB0U1M3UHBqZFZrMA?oc=5",
+      "https://news.google.com/rss/articles/CBMiwAFBVV95cUxPQWQ5clVQbDFpUkRvR3VxeXg3MHMxQXhmOXg1UjVGbjBjTXhEZmF2TlpRUmEya01mRThZQUpNeGc3MzlsbEpNdEZmOW5HSmVJandLOVJRd3RoWGNQYnFsbUFEQ2U1ME5GVTdIUmI5TGhocUpPS3N0czhOTHJBc1JULS1CcW9sWVRSdTdOYTNNZVdDVHM5ZHV6NUFQVkFXejQ3YTVaenZMOWR3MlZMUUx6QW5iSzYtN3AtSUctSDZkVlo?oc=5",
+      "https://news.google.com/rss/articles/CBMi-gFBVV95cUxOWUNvYklGbHZubWlDbnI4UzhUWWFQb0wtb1ZWV3RpaEt4dFNSZ0pMX1J4cjlrbmN1SEtJaXFYY2R1U2hleVhwcWFLdG5xamZtbWZtNUZJdUplSlZQUzdsbXM1X20tR2JjZW9jaTF3Wk1tSzVnQTBGZUxtelVwTFlwMWJ6WEN3M1pfNFZfdGxMZVI1cEs0OWpOc1YyNE5zZnRvWWNLN0V1VGVZaVpMdjd4djlwRDVtRXltaktDTWRKU3pSeUhNNGpTVm8zdWI4bEt1bUU2N1NBb295cFZOTGV2dUFqVlN5bncyN1czTk96bmNNcmdHUVozYkhB?oc=5",
+      "https://news.google.com/rss/articles/CBMiWkFVX3lxTE01SzBBRG1NdWpNcll2WTFDMHJPcDgzRE5zYllEdVFHQjhjWHhrcVlENm05VnphUkpIOUxPejVLNmVXWXRya0hGUUxWaDhjTnRCdFZMYUlzNjgyZw?oc=5",
+      "https://news.google.com/rss/articles/CBMihAJBVV95cUxNdUFhUG13QVM1NGRkZnRJT2FYLU1qT0MzRUVPMjJwVUMtVk02Mm1sV1FYbUJMbWNNRFFqT3dfdDNPaWl5NXVuY0d1X2w2VDdwTU5TMEpocVViYUZlNnlxZUluLW03cVBlRnhMVEp3M0dHcmhfMkRIbXVRR3YwV3pkOHM2Smo2RHY5eFRzVTBVMXF6b2VOWWhReWVZX2dmVjZ1WnhaUWZWX01leTBlOGF0THJ0Q1RpdnBWLWxJNkNkWWFWNl9ZOUtERUF5bHRRY2t1RlNqWXh6Q3FGX1pmR2puYnlGMjY4Rm9uR1ZJa2JnWUtRNC1QMnNzMFRYSVlmUEtzTE8tMA?oc=5",
+      "https://news.google.com/rss/articles/CBMioAFBVV95cUxPRU8wTWVhTzBEVEhWWURIRlhKZV95Ump2b2t0VFNhZ1MwblpnbGNFRUxtNEdwNnJINGQ0R0lWUE9adjRhQUhmek5WSlYtRXdZc3BIYzlKLTVxM2ZNdGRVSi1PZVU1QmFHaTJudzlsMGxjaFQxTkY5NlZwZS15MXo1VDNTSFdObkhWSDAzaEx0cVVhTm9kUUh6SEJEY1k1MWpx?oc=5",
+      "https://news.google.com/rss/articles/CBMilAFBVV95cUxNdXlIcG9fRkZubUduSmFkRU9WcE9KaE5aX2x1Q1FHX294YmxwVnNJLU9ESVJXSHhXUGJ2Y0NVT1RsTDFMSmpOQmZOSnFYNG5BVkpQR2w1S3pHRlFnVlpGOTJnRGlrLW00aTdES0pMZk1GcmkwWTVoZ1AxbHVyblFpWHFDcFdjT3hrNFkyX210UHctcDVR?oc=5"
+    ],
+    "static_urls": [
+      "https://my.gov.au/",
+      "https://www.ato.gov.au/",
+      "https://www.bom.gov.au/",
+      "https://www.commbank.com.au/",
+      "https://www.seek.com.au/",
+      "https://www.realestate.com.au/",
+      "https://www.woolworths.com.au/",
+      "https://www.coles.com.au/",
+      "https://www.amazon.com.au/",
+      "https://www.bunnings.com.au/"
+    ]
+  }
+}

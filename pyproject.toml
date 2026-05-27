@@ -1,0 +1,29 @@
+[project]
+name = "ip-sentinel"
+version = "4.1.1"
+description = "Distributed VPS IP maintenance and geo-correction engine (Agent + data factory)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["py", "py/master"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"py/webhook.py" = ["E501"]

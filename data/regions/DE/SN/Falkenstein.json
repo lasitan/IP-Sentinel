@@ -1,0 +1,55 @@
+{
+  "region_name": "Germany - Saxony (Falkenstein)",
+  "google_module": {
+    "base_lat": 50.4779,
+    "base_lon": 12.3713,
+    "lang_params": "hl=de-DE&gl=DE",
+    "valid_url_suffix": "de"
+  },
+  "trust_module": {
+    "white_urls": [
+      "https://news.google.com/rss/articles/CBMizgFBVV95cUxOTXhDT2tPVklzSlFyazdURmJ3ZUNsWjRBeWJPNUhHMlg2QUFONGg1Wk10cEFzVkE4X09PVHRLNHJrb05WRUNER2xuN3hselZmVXJrS05pb2l0dXlHdmlLc0J1VjRmd1AyQ2hRUVRiTGZpdEc2VkhLOEo2UGxERGVqdllsTmh6TGE0c1QxQ2dvT0tiV3ZDRklQZHBRVlZGV293eEl2VnlNOEJlWmNZeFVieUpDY21pRHdRZXprcV94V0Z6eXdOVWZzRHNrY3dQZw?oc=5",
+      "https://news.google.com/rss/articles/CBMiqgFBVV95cUxOQTc3Y282NVcyZUJIcV9nTTVmZHpWZ0VHZjk5c3FPX1hPV1JpeHBjaFh4X3Vzd3I2MnlkTjhCR0pGdG9YakFsM1YyZXVjVklpN3hZRkkxLVlLaHV6SGFEZDhGZ3JCTlNSX0FqalNjNzd6TE5lVDZacXNzb0dBR19pVlJmTmIwaWlBZmxSMmlDVkxmZC1QbEYyeDQxVzR5UEJJb1JHV2lURUVqQQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiqgFBVV95cUxQdXUwVHRfZ0RqSm9QanA0NUVObVJXd0pyOC1jNGIyaWdTZHJ0anZuV1Rub3gwc2J3eEVsU1l2U1JIcFRjOGp1eXd1cUppcDBXb0g0dXhPSnhUNHRHaUxsOG5vSm5naHVJRWh5aElna0lwMk1KSUdIM1FjaHF6VjROVU5iYWtmNm5od0FXcnBHQzZxenlrUk00aWdCbnJFWEN5b3N4MGtGdGFmQQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiqwFBVV95cUxON1h1eURDNXdGRnp4SEZtWFhmVFJmTXRwNElsRGhLUzVSVVBHalo5SkJ6c1czTDB6ZlNVZ2lWYUdvWHhXMmNHd1hMNktiNXdrcW5tMS1qYy1aVG9EY3BhVHY1T0Q1WGJJaHFSbzdzVUtwTURQUzdXbV9DRm9BX0J3UnJDMGhrNWVPdThDdTVZaTZGeWl3YWlEeXlDQ1VGOGpJM0Z1UXZ3eEdZZ00?oc=5",
+      "https://news.google.com/rss/articles/CBMi1gFBVV95cUxQYm5ZZzZyVkg4dzdfRjZ6LUFOVWN3NHRxdVJFOFdENHNYR0k5NlFOYmx3aURqYlctV2IxbU42MUJNTFd2MG5JcVBHQ2UxTTZ0RkQ3R0NfdDE3STQtTTFkSERsQ3REdW5DaHluX0lRZk5NQTNyOHNjelJEVE5LbTgtN2t5aUtUNE9xTmFCb2xTZ3V1N09GS2R1VlVyaGZJbnJEZkpuUlhZMVExMGkyc0tmcV8ycTF4N3pvQmhIU3JwdlJLSHAtQy1tc2FSYWJnQ3Y2Ynd5OGV3?oc=5",
+      "https://news.google.com/rss/articles/CBMizwFBVV95cUxOX2w4LWZtZ0NqQTB1RVNOY2FLMWlpX2JRcVZIWGpJYzMwQlVZd0loTG50d2ZQWmJIT1ZsVUszNDl1MDlyTGNsQTJmVUFCZm9QWElpdnNjbHplaG1ZUGxzcjRfVWp0MWNsUDhsU0xjZDJXX2dFZUVhNzVva0M3cTl0YXJBRmtGcmJUMG9PZjNNTHRaSFdXT1NYU1ZDX3diOGFGU0c3d3pBa1NOUHdnUGJOQmtfZUFGdnZic0VSblJ4aVZXdW1ERlZkUXhJX3pGOW8?oc=5",
+      "https://news.google.com/rss/articles/CBMixgFBVV95cUxPbFdmc0NtTWh3QTlsVDRNa0dqYVBBNDhMQXk2eUdZaUc1azZULUJGWWJlR1g2ZjhrSVY3dTh1RHFLazRVNWxLRjY2bUlsdDNkZ0pxajc4eTZwSzh4OTJ3UkxpU2NpTXdHRUN3QzBScFR1bWpwdV83a1MxSElqSF96TVhXWFJhZEJPbHVWTDZuVTA2eWNiYjNfMHk4MWllZVI5czFiTEdBRVdOakxWYVFMSUY1QzhNYXdSbk8xdkt6NnFFY1o1Rnc?oc=5",
+      "https://news.google.com/rss/articles/CBMijAFBVV95cUxNZkdCOWNEWVZBc3dCWFp0ajFMMG9BNWFYSjlqby1xOUVJcEdfRTlCVTNMRlV3Z0p1Uk1tSnQ5cWQzaU9JbmpEcEc5bzM4SGRZeWdqbnNlNkIwMGR4dzNwR0JuM0RBcWxMb2xGb1VYOFhXaDZqU0tkdWUzTTFrcUxMWG9XRS1DTWgwdV96SA?oc=5",
+      "https://www.microsoft.com/",
+      "https://news.google.com/rss/articles/CBMixAFBVV95cUxOci11WV9Vb0hZcEt5cmhFcThPVk9wWHZnZkY0QTB6MDV1Nl9YWlRPcGFXSGR0NzZqbG1jeU5Sa1cxeFFRd1BNQUJRM1dqaGUwM3dXXzVONW1GVWtHanhYaHo0MHpwUzJRWVVGa192WjdmdHpNa3pFWVp5TDg4Skw0ZEVlSHlpTXBXWUZLLVVBRG1tWkRaN3UyMTNCVlY3QnJsejNtQUxnWW16emZKWkJNdkNiSFVWX0FiZV9PaEZiNnpSS3pr?oc=5",
+      "https://news.google.com/rss/articles/CBMipwFBVV95cUxOLUJnVkhqR1pwNWFYOEhrcGIwSjM4NDAxazhIQ3pQWG8yZ3VpRG9VVURzUFpEc3JmRjExZkNxU0dIQTJHSFpDTmxVVFJlSGprV2ZIaWZLdFNVckhFVmRPMVFPeFo0eXNDUVNTUk1ERnZiYjB4QUxramtFak1BdFJBYXZSd2FOZGNsOUlWcW5tM1lJcDBIZ3JyTFNOMkM3U24wZncwNmJISQ?oc=5",
+      "https://news.google.com/rss/articles/CBMiekFVX3lxTFBNUXZXeUY3RWxEb2JMSXNGdThzTHA1cnZfYWY2Qk91WVdVcVI2R2luMFoyd0p1NnZOcTVFOVpKaUhYNzcxY1FuOWFEYlVPV29IX0JWZ3UzcGF3WnhNRDhMTFlPR3VfaHhCa0JCSktOSWstYmYxTFl4YmlR?oc=5",
+      "https://news.google.com/rss/articles/CBMi0AFBVV95cUxQRzhHa0FpR1BIZlRyOGFXeEo0UnhFVUg0dlpfVW11cjczZ1UtTmlEOGdNWnJkTDFxdkxOTzFhT1dWQmZYNU94bDV5U0hJdWJlU2pFUnBFb3ZfMXpkY0ltejhlMnZyNG5mYjc0M0l6ZzRyY2Y4VEY4alBlOXQ0ZllfUTM3WTJZdXJtY25hbldQRVRqZjNhMVRtYy1NejBuM29TUkYxa3JkeUFES2tUc3I3QTZjcVN3aTMxY1Y0UUlKZjRNMFVodGljLU8xYVdRdU5k?oc=5",
+      "https://news.google.com/rss/articles/CBMinAFBVV95cUxOYi1laElXVzhEdDVfaDlid2xTMlNwVUJDSFdEY1U3RWFibjAzdXNUajhIZmt6SHhhYmpBZ2F4cmR5RDNMcnVMYm9kanFKemg4LUlFZnF3TThrTXNqS2dmRXFNNjFoeHFzejhZQUZlMlZVZU1QZnc5WlBlbXlKd2VkN1ltWVItRUFtdHBNdTJDZEU0dXNabFNiTXhPd0c?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=27592",
+      "https://news.google.com/rss/articles/CBMinwFBVV95cUxOR3prOFFHNWZ2dmtuRUtUTm05QjJnMUNXNjlNc3Y4STI0N3lPbm42eXNYWGxKWUZEY0EzYlRJWS0xTklNYmJldEVmSEREaFBJR2IwakZnU3Z4dzN1Uk5sLXNMd2F3S0pnVHBIczZ3U2MyZ1JmU2FRUVdqREhiQlA0b0wtYXVxb211bW9XSVBtTWJIY2RsUFgtdVJBQWwxX0U?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random?r=96118",
+      "https://news.google.com/rss/articles/CBMiuwFBVV95cUxObEdRdUpNRms1TFhpdnpOX1YwcXZiNm1qRWxKM2lJYzY2eHoydVhrQ0hDT1puUDUwbTRFSWJNemdBTl9HdERRTkg1R2ZpSEZsTzJoUGlNcWhkek9UVno2c0dRekYzZWJnbGJCTUNRNDdPUTdvMzdKamZkZGtQYWltcVZIUy10dkEwRmgxRUtWVUo0R014NFRZOXF6dm95TlpicHBHOHVwWGFOTlhmRGhnVTdxTlAtckdLNktz?oc=5",
+      "https://en.wikipedia.org/wiki/Special:Random",
+      "https://news.google.com/rss/articles/CBMipAFBVV95cUxQS2tpU003WnJJTnBWU25wZjRYUE1UZVB6MmtHYTA0d2dEbEVVSUl2dGdualFEZF96Q2QwYWVrRVFIS0huSmpCeUJVZG5jbDBHLVVEajdTUTZLRWVsRDE1eFRsWjZrRmc5LXdvNDUxZjhCVW42a2k3UG9YS18zUHRtYmo2amtRaGZFbGpoLWU1OTEzaXdIRDJfc1puYUN3aUhWTzNqYg?oc=5",
+      "https://news.google.com/rss/articles/CBMilwFBVV95cUxNNVNaNm5fQ3d6cEQ5R3h3NDFKZzgyTlJ0TXJEQU51YWR4N1FPQ1pNTzRWS0xjSXFQbEdhWDVxMmo5U25jN1BNWXBQLU1DUXM2cU9kVjRJdzVGaUlvTWJ4enJnT1R2bmpBS3lTSHFjNU0tYXhja0lUOEZQMVhIVVZfT3piNVNlNDM2MEJIZFBYNUp6b1RYcjBN?oc=5",
+      "https://news.google.com/rss/articles/CBMixgFBVV95cUxPcUlUNG5sUkpCdURDRzc4WmJHTk1rN3Q2bEZzZldCOTg0SVBpbjlQdHcwdGhlVUlMaFVMREtmVXJvU05oMUJvc1lWRkR3VXo5dWRLZW14cldFVjB6WUtsUFY3eEs4MllWak50LXhqU3FTYUNIZzJKQUw3U09aYlZTVFJac05KTmM5RUFxUExjaUxNVHhEbnBqVWsxQ3p2Q3R2QlY4NTJWd21UQkQ4emhpZnZCbGZicU12WEhzNE1QN0gzVkZJNXc?oc=5",
+      "https://news.google.com/rss/articles/CBMitgFBVV95cUxQbDBkZEJDdmNabzM2ZU8xbklRVE1yTXVEU2pyeW8zQlV5a0VEcWdnTS01ZnVYSjRKWmlxdnNOTnV0TUN6LTNBZDZobTEwWEUzQlVIdHAteXZnVlFwMmdBRElJNXNvNlhLS2JleU5icG1LUFJNbFVLcld4TExRS1lmUjdSZUxWQjhlc2xNcEhjZ3d4R2JMTmtkWk8yNFYzMTlvT0otU3hERXN2bGdSV2kwRVRrWVJ1QQ?oc=5",
+      "https://news.google.com/rss/articles/CBMi4gFBVV95cUxOMzhoV2gwQUttamdOdlRKdk1JS2hGTEVYTWpGSEdESE8xWTIwc25DbEstSmNPTnN3MnVwYlNvQmUtNWJJS2Y1YUMzZmt4dHMteWtrWTZJV29ITWE2eEE0R2N2RDgwd2VBSC1OTDJhN1BHWXV2cDlnbUl4LXlmMXB2S3gyUThrSjNZUTBjWHZ5RXphbnZLYkN0R3M0OHdRRW51S200ZVR1Q2xSMnhnQUJqZ3pVOVYydklLV0xXY0NpRVJmZkgwU0lhdTAxOTlZRmFxSXg3LTRnQWxtd1MtTktiMWZ3?oc=5",
+      "https://news.google.com/rss/articles/CBMikAFBVV95cUxOY1lSOWY0MW5Ub2doWF9IUVkwUld3X2dfMm5wMjNCcHBBaXBaWC02Wjh3ZEQ2anJEdWpMaGF6akRrRW5TdEdwOUtaa1BVVzV2dVpfMVBDVWFmdVc3MnlEY3dpS1BvY19Mc0xwWEtuVHVvd1BoZVBDTlZ5UU5Fa2h2aEF6UzJ3aGVxYXA4b1E3VXA?oc=5",
+      "https://news.google.com/rss/articles/CBMilwFBVV95cUxNalppLTBwMFJBeXpVT0xMdDEyT1dKenByRUgwYlhjUExhRkprTm1yaEpzclRZUU10bUVLOHBuMzAwUU1md3RZMllKMXpFeEFGc3hjQVFLdVFoYlc3dlBsWjhHX3E3alNsbW5EbDN1OGc3YUJBa3E4Mm5sMmRGdXJXUXAtR0VrYndGV2xGaE1WTTNsUHVOenlN?oc=5",
+      "https://news.google.com/rss/articles/CBMiwgFBVV95cUxNTk5ibUcxVEItcDJmMmtpWG9kN1F4cWtueFY3dDNUdEpjek1fNHFnNWhLV1NvVDJFUDNyZ2E5QTFqdXRoajZsV2J0OEMxenk1SURhRDUwLTYycHRDeEpiek1CM2J3MnR2UlBuXzc5YkV6QWdmTjhUZGxFVHZMdnpOYkVfcjY0c2hBVXRKQzZSbERtcTk3SzlvWXZpMjNKUWlSUTVvOVh3bnR0c1EzMTB4SUwxcGY2R09RZE5TSUE1M3pudw?oc=5",
+      "https://news.google.com/rss/articles/CBMiiAJBVV95cUxPTzJjNzg4Rkw1cU9oVUY0c0xzVEo0dk5yTlNmZ0hhQ2pORFY3WGFXZDVySENaZldVdDVJbGh0eVhBVkYxUUFWZ1V5TlI4NUs3b2U5Mld5bW9OclFZYUFOanlERWNWS2JDVFZTSlRfaWpnd3J5TEVKT2lmNmhGWkVsZXkxeGxQX3diMmFFVS1RYTJfZ2ZkUjdwZVVGOVNGX1I5NTdnZllaWWNPMVYzR1hXcDVyY2VWckdnUEUtTEtBT2t4TGVIY3JJSk1ZWmxFLXVCelJSeENVSnVJb0hEN0lySnhEWi1PTS1yQXdBUUtSc0ZVLTJTWXhnOFFzYnEyVTB1WEtRUUFVcUI?oc=5",
+      "https://www.apple.com/",
+      "https://news.google.com/rss/articles/CBMidEFVX3lxTFBjeGV4WVZZdEVCNkVtM0NPZkRuc0U2ZjJfT1M3M1FYc0gxaFdZSTdHTnlMcUU5VTJNakI3XzE1ay1yOFluNDR2bmd5ZG96NUQwanZNNDFCdlRNajRtOFdSNGpJdEM0S1JTVElTbmZZenNHQkh3?oc=5"
+    ],
+    "static_urls": [
+      "https://www.bundesregierung.de/",
+      "https://www.arbeitsagentur.de/",
+      "https://www.dwd.de/",
+      "https://www.sparkasse.de/",
+      "https://www.stepstone.de/",
+      "https://www.immobilienscout24.de/",
+      "https://www.rewe.de/",
+      "https://www.edeka.de/",
+      "https://www.amazon.de/",
+      "https://www.obi.de/"
+    ]
+  }
+}
