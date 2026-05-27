@@ -103,12 +103,25 @@ def fetch_text(
     ua: str | None = None,
     follow: bool = True,
     timeout: int = 10,
+    cookie: str | None = None,
+    extra_headers: list[str] | None = None,
+    tls13: bool = False,
+    fail_on_http_error: bool = False,
 ) -> str:
     cmd = _base_cmd(ctx, timeout) + ["-s"]
+    if fail_on_http_error:
+        cmd.append("-f")
     if follow:
         cmd.append("-L")
+    if tls13:
+        cmd.append("--tlsv1.3")
     if ua:
         cmd.extend(["-A", ua])
+    if cookie:
+        cmd.extend(["-b", cookie])
+    if extra_headers:
+        for h in extra_headers:
+            cmd.extend(["-H", h])
     cmd.append(url)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5, check=False)

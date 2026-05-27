@@ -63,27 +63,31 @@ def _first_regex(html: str, patterns: list[str]) -> str:
 
 
 def parse_yt_premium_gl(html: str) -> str:
-    if "www.google.cn" in html:
+    """
+    从 YouTube Premium 页解析地区（对齐 xykt：contentRegion + INNERTUBE GL）。
+    不使用泛化 countryCode，避免把语言包 CN 误判为地理 CN。
+    """
+    if re.search(r"www\.google\.cn", html):
         return "CN"
-    return _first_regex(
+    gl = _first_regex(
         html,
         [
             r'"contentRegion":"([A-Za-z]{2})"',
-            r'"countryCode":"([A-Za-z]{2})"',
             r'"INNERTUBE_CONTEXT_GL":"([A-Za-z]{2})"',
         ],
     )
+    return gl
 
 
 def parse_yt_music_gl(html: str) -> str:
-    if "www.google.cn" in html:
+    if re.search(r"www\.google\.cn", html):
         return "CN"
     return _first_regex(
         html,
         [
             r'"INNERTUBE_CONTEXT_GL":"([A-Za-z]{2})"',
-            r'"countryCode":"([A-Za-z]{2})"',
             r'"GL":"([A-Za-z]{2})"',
+            r'"contentRegion":"([A-Za-z]{2})"',
         ],
     )
 

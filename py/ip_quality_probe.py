@@ -1,4 +1,4 @@
-"""原生 Python IP 质量探针（输出与 xykt/IPQuality -j JSON 兼容）."""
+"""原生 Python IP 质量探针（检测逻辑对齐 xykt/IPQuality）."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from geo_probe import parse_yt_premium_gl
-from network import CurlContext, build_curl_context, fetch_headers, fetch_text, http_status
+from geo_probe import parse_jump_gl, parse_yt_music_gl, parse_yt_premium_gl
+from network import CurlContext, build_curl_context, fetch_headers, fetch_text
 from persona import DEFAULT_UA
 
 LogFn = Callable[[str, str], None]
@@ -18,6 +18,14 @@ LogFn = Callable[[str, str], None]
 _IP_API_FIELDS = (
     "status,message,query,country,countryCode,regionName,city,isp,org,as,mobile,proxy,hosting"
 )
+
+# xykt MediaUnlockTest_YouTube_Premium 同款 Cookie（CONSENT + GPS）
+_YT_PREMIUM_COOKIE = (
+    "YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; "
+    "VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai"
+)
+
+_NETFLIX_TITLES = ("81280792", "70143836")
 
 
 def _log(log_fn: LogFn | None, level: str, msg: str) -> None:
@@ -48,9 +56,11 @@ def _fetch_ip_api(ip: str, ctx: CurlContext) -> dict[str, Any]:
         if data.get("status") == "success":
             return data
         if data.get("ip") or data.get("country_name"):
+            cc = data.get("country_code") or ""
             return {
                 "status": "success",
                 "country": data.get("country_name") or data.get("country"),
+                "countryCode": cc.upper() if cc else "",
                 "city": data.get("city"),
                 "org": data.get("org") or data.get("asn"),
                 "as": data.get("asn"),
@@ -66,8 +76,17 @@ def _asn_number(as_field: str) -> str:
     return m.group(1) if m else ""
 
 
-def _fetch_scamalytics_score(ip: str, ctx: CurlContext, ua: str) -> str:
-    html = fetch_text(f"https://scamalytics.com/ip/{ip}", ctx, ua=ua, timeout=20)
+def _fetch_scamalytics_score(ip: str, ctx: CurlContext) -> str:
+    raw = fetch_text(f"https://ipinfo.check.place/{ip}?db=scamalytics", ctx, timeout=12)
+    if raw:
+        try:
+            data = json.loads(raw)
+            score = data.get("scamalytics", {}).get("scamalytics_score")
+            if score is not None and str(score) not in ("", "null"):
+                return str(int(float(score)))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    html = fetch_text(f"https://scamalytics.com/ip/{ip}", ctx, ua=DEFAULT_UA, timeout=20)
     if not html:
         return "N/A"
     for pat in (
@@ -82,10 +101,6 @@ def _fetch_scamalytics_score(ip: str, ctx: CurlContext, ua: str) -> str:
 
 
 def _check_port25(cfg: dict[str, Any]) -> bool | None:
-    """
-    SMTP 25 出站探测。
-    返回 True/False；绑定出口但无法探测时返回 None（未测）.
-    """
     bind_ip = (cfg.get("BIND_IP") or "").strip().strip("[]")
     target = ("gmail-smtp-in.l.google.com", 25)
     try:
@@ -110,7 +125,7 @@ def _check_port25(cfg: dict[str, Any]) -> bool | None:
 
 
 def _media_unlock(region: str, typ: str = "") -> dict[str, str]:
-    return {"Status": "解锁", "Region": region or "未知", "Type": typ}
+    return {"Status": "解锁", "Region": region or "", "Type": typ}
 
 
 def _media_partial(msg: str, region: str = "") -> dict[str, str]:
@@ -121,96 +136,161 @@ def _media_block(msg: str = "屏蔽") -> dict[str, str]:
     return {"Status": msg, "Region": "", "Type": ""}
 
 
-def _probe_youtube(ctx: CurlContext, ua: str) -> dict[str, str]:
-    html = fetch_text("https://www.youtube.com/premium", ctx, ua=ua, timeout=15)
-    if "www.google.cn" in html:
-        return _media_block("中国")
-    gl = parse_yt_premium_gl(html)
-    if gl == "CN":
-        return _media_block("中国")
-    if gl:
-        return _media_unlock(gl, "Premium")
-    code = http_status("https://www.youtube.com/premium", ctx, ua=ua, timeout=12)
-    if code.startswith("2"):
-        return _media_partial("待确认", "")
-    return _media_block("失败")
+def _probe_youtube(ctx: CurlContext, ua: str) -> tuple[dict[str, str], str]:
+    """返回 (media结果, premium_gl). 逻辑对齐 xykt MediaUnlockTest_YouTube_Premium."""
+    html = fetch_text(
+        "https://www.youtube.com/premium",
+        ctx,
+        ua=ua,
+        timeout=15,
+        cookie=_YT_PREMIUM_COOKIE,
+        extra_headers=["Accept-Language: en"],
+    )
+    if not html:
+        return _media_block("失败"), ""
+
+    if re.search(r"www\.google\.cn", html):
+        return _media_block("中国"), "CN"
+
+    region = parse_yt_premium_gl(html)
+    if region == "CN":
+        return _media_block("中国"), "CN"
+
+    if "Premium is not available in your country" in html:
+        return _media_partial("无Premium", region), region
+
+    if "ad-free" in html and region:
+        return _media_unlock(region, "Premium"), region
+    if "ad-free" in html:
+        return _media_unlock("", "Premium"), region or ""
+
+    return _media_block("失败"), region or ""
+
+
+def _probe_youtube_music_gl(ctx: CurlContext, ua: str) -> str:
+    html = fetch_text("https://music.youtube.com/", ctx, ua=ua, timeout=15)
+    if not html:
+        return ""
+    return parse_yt_music_gl(html)
+
+
+def _netflix_region_from_body(body: str) -> str:
+    m = re.search(r'"id":"([^"]+)".*?"countryName":"[^"]*"', body)
+    return m.group(1).upper() if m else ""
 
 
 def _probe_netflix(ctx: CurlContext, ua: str) -> dict[str, str]:
-    code = http_status("https://www.netflix.com/", ctx, ua=ua, follow=True, timeout=15)
-    if not code.startswith("2"):
-        return _media_block(f"HTTP {code}")
-    html = fetch_text("https://www.netflix.com/", ctx, ua=ua, timeout=15)
-    low = html.lower()
-    if (
-        "not available" in low
-        or "不可用" in html
-        or ("sorry" in low and "netflix" in low)
-        or "unavailable in your country" in low
-    ):
-        return _media_block("地区不可用")
-    return _media_unlock("", "Streaming")
+    """对齐 xykt：检测固定 title 页，而非首页文案."""
+    bodies: list[str] = []
+    for tid in _NETFLIX_TITLES:
+        body = fetch_text(
+            f"https://www.netflix.com/title/{tid}",
+            ctx,
+            ua=ua,
+            timeout=15,
+            tls13=True,
+            fail_on_http_error=True,
+        )
+        bodies.append(body or "")
+
+    if not all(bodies):
+        return _media_block("探测失败")
+
+    region = _netflix_region_from_body(bodies[0]) or _netflix_region_from_body(bodies[1])
+    oh_no = [("Oh no!" in b) for b in bodies]
+
+    if all(oh_no):
+        return {"Status": "仅自制", "Region": region, "Type": "Streaming"}
+    if not any(oh_no):
+        return _media_unlock(region, "Streaming")
+    return _media_block("未解锁")
+
+
+def _parse_cf_trace_loc(trace: str) -> str:
+    for line in trace.splitlines():
+        if line.startswith("loc="):
+            return line.split("=", 1)[1].strip().upper()
+    return ""
 
 
 def _probe_chatgpt(ctx: CurlContext, ua: str) -> dict[str, str]:
-    code = http_status("https://chatgpt.com/", ctx, ua=ua, follow=True, timeout=15)
-    if code.startswith("2"):
-        return _media_unlock("", "Web")
-    if code in ("403", "451"):
-        return _media_block("屏蔽")
-    return _media_partial(f"HTTP {code}", "")
+    """对齐 xykt：以 Cloudflare trace 的 loc= 为准，不单看 chatgpt.com HTTP 码."""
+    trace = fetch_text("https://chatgpt.com/cdn-cgi/trace", ctx, timeout=12)
+    if not trace:
+        trace = fetch_text("https://chat.openai.com/cdn-cgi/trace", ctx, timeout=12)
+    loc = _parse_cf_trace_loc(trace)
+    if loc == "CN":
+        return _media_block("中国")
+    if loc and len(loc) == 2:
+        return _media_unlock(loc, "Web")
+    return _media_partial("待确认", "")
 
 
 def _probe_tiktok(ctx: CurlContext, ua: str) -> dict[str, str]:
-    code = http_status("https://www.tiktok.com/", ctx, ua=ua, follow=True, timeout=15)
-    if code.startswith("2"):
+    body = fetch_text("https://www.tiktok.com/", ctx, ua=ua, timeout=15)
+    if not body:
+        return _media_block("探测失败")
+    if "tiktok" in body.lower():
         return _media_unlock("", "")
-    return _media_block(f"HTTP {code}")
+    return _media_partial("待确认", "")
 
 
 def _probe_disney(ctx: CurlContext, ua: str) -> dict[str, str]:
-    code = http_status("https://www.disneyplus.com/", ctx, ua=ua, follow=True, timeout=15)
-    if code.startswith("2"):
+    body = fetch_text("https://www.disneyplus.com/", ctx, ua=ua, timeout=15)
+    if not body:
+        return _media_block("探测失败")
+    if "disney" in body.lower() and "not available" not in body.lower():
         return _media_partial("待确认", "")
-    return _media_block(f"HTTP {code}")
+    if "not available" in body.lower():
+        return _media_block("地区不可用")
+    return _media_partial("待确认", "")
 
 
 def _probe_prime(ctx: CurlContext, ua: str) -> dict[str, str]:
-    hdr = fetch_headers("https://www.primevideo.com/", ctx, timeout=12)
-    if "location:" in hdr.lower():
-        return _media_unlock("", "Prime")
-    code = http_status("https://www.primevideo.com/", ctx, ua=ua, timeout=12)
-    if code.startswith("2"):
-        return _media_partial("待确认", "")
-    return _media_block(f"HTTP {code}")
+    html = fetch_text("https://www.primevideo.com/", ctx, ua=ua, timeout=15)
+    if not html:
+        return _media_block("探测失败")
+    m = re.search(r'"currentTerritory":"([^"]+)"', html)
+    if m:
+        return _media_unlock(m.group(1).upper(), "Prime")
+    return _media_partial("待确认", "")
 
 
-def _run_media_probes(ctx: CurlContext, ua: str) -> dict[str, dict[str, str]]:
+def _run_media_probes(
+    ctx: CurlContext,
+    ua: str,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    media: dict[str, dict[str, str]] = {}
+    google_geo: dict[str, str] = {}
+
+    jump_hdr = fetch_headers("http://www.google.com/", ctx, timeout=10)
+    google_geo["jump"] = parse_jump_gl(jump_hdr)
+
+    yt_media, yt_gl = _probe_youtube(ctx, ua)
+    media["Youtube"] = yt_media
+    google_geo["premium"] = yt_gl
+
     tasks = {
-        "Youtube": lambda: _probe_youtube(ctx, ua),
         "Netflix": lambda: _probe_netflix(ctx, ua),
         "ChatGPT": lambda: _probe_chatgpt(ctx, ua),
         "TikTok": lambda: _probe_tiktok(ctx, ua),
         "DisneyPlus": lambda: _probe_disney(ctx, ua),
         "AmazonPrimeVideo": lambda: _probe_prime(ctx, ua),
     }
-    out: dict[str, dict[str, str]] = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(fn): name for name, fn in tasks.items()}
         for fut in as_completed(futures):
             name = futures[fut]
             try:
-                out[name] = fut.result()
+                media[name] = fut.result()
             except Exception:
-                out[name] = _media_block("探测异常")
-    return out
+                media[name] = _media_block("探测异常")
+
+    google_geo["music"] = _probe_youtube_music_gl(ctx, ua)
+    return media, google_geo
 
 
 def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[str, Any] | None:
-    """
-    执行 IP 质量检测，返回与 IPQuality -j 兼容的 JSON 结构。
-    全程 Python + curl，不调用 bash ip_probe.sh。
-    """
     ctx = build_curl_context(cfg, lambda lvl, msg: _log(log_fn, lvl, msg))
     ua = DEFAULT_UA
 
@@ -224,6 +304,12 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
     geo = _fetch_ip_api(ip, ctx)
     if not geo:
         _log(log_fn, "WARN ", "GeoIP 查询失败，使用最小结果集")
+
+    ip_cc = (geo.get("countryCode") or "").upper()
+    if not ip_cc and geo.get("country"):
+        name = str(geo.get("country", "")).lower()
+        if "taiwan" in name:
+            ip_cc = "TW"
 
     asn_raw = geo.get("as", "") or ""
     org = geo.get("org") or geo.get("isp") or "Unknown"
@@ -245,10 +331,11 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
     usage = "机房" if hosting else ("移动" if mobile else "家庭宽带")
 
     _log(log_fn, "INFO ", "Python 探针: Scamalytics 风险分…")
-    scam = _fetch_scamalytics_score(ip, ctx, ua)
+    scam = _fetch_scamalytics_score(ip, ctx)
 
-    _log(log_fn, "INFO ", "Python 探针: 流媒体解锁检测（并行）…")
-    media = _run_media_probes(ctx, ua)
+    _log(log_fn, "INFO ", "Python 探针: Google 三核 + 流媒体（并行）…")
+    media, google_geo = _run_media_probes(ctx, ua)
+    google_geo["ipCountry"] = ip_cc
 
     port25 = _check_port25(cfg)
 
@@ -274,6 +361,7 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
             "VPN": {"ip-api": proxy},
         },
         "Media": media,
+        "GoogleGeo": google_geo,
         "Mail": {
             "Port25": port25,
             "DNSBlacklist": {"Blacklisted": "0", "Marked": "0", "Total": "0", "Clean": "0"},

@@ -21,13 +21,37 @@ def _parse_media(data: dict, key: str) -> str:
     status = media.get("Status", "未知")
     reg = media.get("Region", "")
     typ = media.get("Type", "")
+    if status == "仅自制":
+        label = escape_markdown(reg) if reg else "有区服"
+        return f"🟡 仅自制剧 ({label})"
     if "解锁" in status:
-        return f"🟢 {escape_markdown(reg)} ({escape_markdown(typ)})"
-    if any(x in status for x in ("仅", "机房", "待支持", "待确认")):
-        return f"🟡 {escape_markdown(status)} {escape_markdown(reg)}"
-    if any(x in status for x in ("屏蔽", "失败", "中国", "禁")):
+        parts = [escape_markdown(reg)] if reg else []
+        if typ:
+            parts.append(escape_markdown(typ))
+        label = " / ".join(parts) if parts else "可访问"
+        return f"🟢 {label}"
+    if any(x in status for x in ("仅", "机房", "待支持", "待确认", "无Premium")):
+        extra = f" {escape_markdown(reg)}" if reg else ""
+        return f"🟡 {escape_markdown(status)}{extra}"
+    if any(x in status for x in ("屏蔽", "失败", "中国", "禁", "未解锁")):
         return f"🔴 {escape_markdown(status)}"
     return f"⚪ {escape_markdown(status)}"
+
+
+def _google_cn_warning(data: dict) -> str:
+    """三核 + IP 归属交叉验证，避免 TW 节点误报 CN."""
+    yt = data.get("Media", {}).get("Youtube", {})
+    if yt.get("Status") == "中国":
+        return "\n🚨 **Google 地理判定为中国大陆。**\n"
+    g = data.get("GoogleGeo", {})
+    probes = [g.get("jump"), g.get("premium"), g.get("music")]
+    cn_count = sum(1 for p in probes if p == "CN")
+    if cn_count < 2:
+        return ""
+    ip_cc = (g.get("ipCountry") or "").upper()
+    if ip_cc in ("TW", "HK", "MO") and cn_count < 3:
+        return ""
+    return "\n🚨 **Google 多探针判定为中国大陆。**\n"
 
 
 def _tg_post(cfg: dict, payload: dict) -> bool:
@@ -130,9 +154,15 @@ def _run_inner(cfg: dict) -> int:
     raw_nf = data.get("Media", {}).get("Netflix", {}).get("Status", "Unknown")
     raw_gpt = data.get("Media", {}).get("ChatGPT", {}).get("Status", "未知")
 
-    warning = ""
-    if raw_yt_reg == "CN" or raw_yt_stat == "中国":
-        warning = "\n🚨 **Google 地理判定为中国大陆。**\n"
+    warning = _google_cn_warning(data)
+    ggeo = data.get("GoogleGeo", {})
+    geo_line = ""
+    if ggeo:
+        geo_line = (
+            f"\n**Google 三核:** Jump `{escape_markdown(ggeo.get('jump') or '?')}` | "
+            f"YT `{escape_markdown(ggeo.get('premium') or '?')}` | "
+            f"Music `{escape_markdown(ggeo.get('music') or '?')}`"
+        )
 
     mail = data.get("Mail", {})
     p25 = _port25_label(mail)
@@ -164,7 +194,7 @@ def _run_inner(cfg: dict) -> int:
 `AS{asn}` | `{org}`
 **定位:** `{country} - {city}`
 **属性:** `{ip_type}` | `{usage}`
-**探针:** {is_proxy}
+**探针:** {is_proxy}{geo_line}
 
 *🛡️ 风险评分 (越低越好)*
 {score_lines}
