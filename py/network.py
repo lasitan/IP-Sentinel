@@ -130,13 +130,63 @@ def fetch_text(
         return ""
 
 
-def fetch_headers(url: str, ctx: CurlContext, *, timeout: int = 10) -> str:
-    cmd = _base_cmd(ctx, timeout) + ["-sI", url]
+def fetch_headers(url: str, ctx: CurlContext, *, timeout: int = 10, ua: str | None = None) -> str:
+    cmd = _base_cmd(ctx, timeout) + ["-sI"]
+    if ua:
+        cmd.extend(["-A", ua])
+    cmd.append(url)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5, check=False)
         return r.stdout or ""
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return ""
+
+
+def fetch_http_response(
+    url: str,
+    ctx: CurlContext,
+    *,
+    ua: str | None = None,
+    follow: bool = False,
+    head_only: bool = False,
+    timeout: int = 30,
+) -> tuple[int, str, dict[str, str]]:
+    """
+    返回 (HTTP 状态码, 响应体, 响应头字典小写键).
+    head_only=True 时响应体为空。
+    """
+    cmd = _base_cmd(ctx, timeout) + ["-sS", "-D", "-", "-o", "-", "-w", "\n%{http_code}"]
+    if follow:
+        cmd.append("-L")
+    if head_only:
+        cmd.append("-I")
+    if ua:
+        cmd.extend(["-A", ua])
+    cmd.append(url)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10, check=False)
+        raw = r.stdout or ""
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return 0, "", {}
+
+    if "\n" not in raw:
+        return 0, raw, {}
+    *rest, code_line = raw.rsplit("\n", 1)
+    try:
+        status = int((code_line or "0").strip())
+    except ValueError:
+        status = 0
+
+    header_blob, _, body = rest[0].partition("\r\n\r\n") if rest else ("", "", "")
+    if not body and "\n\n" in rest[0]:
+        header_blob, _, body = rest[0].partition("\n\n")
+
+    headers: dict[str, str] = {}
+    for line in header_blob.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+    return status, body, headers
 
 
 def preflight(ctx: CurlContext, timeout: int = 4) -> bool:

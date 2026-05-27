@@ -16,8 +16,18 @@ from tg_util import build_svq_callback, escape_markdown, tg_post
 MODULE = "Quality"
 
 _ISO_CC_RE = re.compile(r"^[A-Z]{2}$")
-# 语言码（非 ISO 国家），Netflix 页面常见 zh → 误显示为 ZH
 _NON_COUNTRY_ISO = frozenset({"ZH", "EN"})
+
+# 报告展示顺序: (Media 键, 显示名)
+_UNLOCK_LINES = (
+    ("YoutubePremium", "YouTube Premium"),
+    ("Netflix", "Netflix"),
+    ("Gemini", "Gemini"),
+    ("TikTok", "TikTok"),
+    ("ChatGPT_iOS", "ChatGPT iOS"),
+    ("ChatGPT_Web", "ChatGPT Web"),
+    ("Claude", "Claude"),
+)
 
 
 def _valid_iso(cc: str) -> str:
@@ -28,59 +38,37 @@ def _valid_iso(cc: str) -> str:
 
 
 def _resolve_media_iso(data: dict, key: str) -> str:
-    """从探针结果解析 ISO 3166-1 alpha-2 国家码."""
     media = data.get("Media", {}).get(key, {})
-    status = media.get("Status", "")
     reg = _valid_iso(media.get("Region") or "")
     if reg:
         return reg
-    if status == "中国":
-        return "CN"
-    g = data.get("GoogleGeo", {})
-    for src in (
-        g.get("premium") if key == "Youtube" else "",
-        g.get("music") if key == "Youtube" else "",
-        g.get("ipCountry"),
-    ):
-        cc = _valid_iso(str(src or ""))
-        if cc:
-            return cc
-    return "--"
+    return _valid_iso(data.get("ipCountry", "")) or "--"
 
 
 def _format_media_iso(data: dict, key: str) -> str:
-    """核心业务解锁：仅用 ISO 国家码 + 状态色标."""
     media = data.get("Media", {}).get(key, {})
     status = media.get("Status", "未知")
     iso = escape_markdown(_resolve_media_iso(data, key))
 
     if status == "仅自制":
         return f"🟡 `{iso}`"
-    if "解锁" in status:
+    if status == "解锁":
         return f"🟢 `{iso}`"
-    if status == "中国" or iso == "CN":
-        return "🔴 `CN`"
-    if any(x in status for x in ("屏蔽", "失败", "未解锁", "禁")):
+    if status in ("未解锁", "屏蔽", "地区不可用", "ISP限制") or iso == "CN":
+        if iso == "CN":
+            return "🔴 `CN`"
         return f"🔴 `{iso}`"
-    if any(x in status for x in ("仅", "待确认", "无Premium", "探测失败")):
+    if status in ("失败", "待确认"):
         return f"🟡 `{iso}`"
     return f"⚪ `{iso}`"
 
 
 def _google_cn_warning(data: dict) -> str:
-    """三核 + IP 归属交叉验证，避免 TW 节点误报 CN."""
-    yt = data.get("Media", {}).get("Youtube", {})
-    if yt.get("Status") == "中国":
-        return "\n🚨 **Google 地理判定为中国大陆。**\n"
-    g = data.get("GoogleGeo", {})
-    probes = [g.get("jump"), g.get("premium"), g.get("music")]
-    cn_count = sum(1 for p in probes if p == "CN")
-    if cn_count < 2:
-        return ""
-    ip_cc = (g.get("ipCountry") or "").upper()
-    if ip_cc in ("TW", "HK", "MO") and cn_count < 3:
-        return ""
-    return "\n🚨 **Google 多探针判定为中国大陆。**\n"
+    yt = data.get("Media", {}).get("YoutubePremium", {})
+    reg = _valid_iso(yt.get("Region", ""))
+    if yt.get("Status") in ("未解锁", "屏蔽") and reg == "CN":
+        return "\n🚨 **YouTube Premium 判定为中国大陆。**\n"
+    return ""
 
 
 def _tg_post(cfg: dict, payload: dict) -> bool:
@@ -109,7 +97,7 @@ def _format_score_label(name: str, val: str) -> str:
     return f"• **{name}:** `{escape_markdown(val)}/100`"
 
 
-def _scores_footnote(scam: str, abuse: str, ipqs: str, ip2l: str, fraud: str) -> str:
+def _scores_footnote(scam: str, abuse: str, ipqs: str, ip2l: str) -> str:
     core = (scam, abuse, ipqs, ip2l)
     ok = sum(1 for v in core if v != "N/A")
     if ok == 0:
@@ -133,7 +121,7 @@ def _run_inner(cfg: dict) -> int:
     def _probe_log(level: str, msg: str) -> None:
         log(cfg, MODULE, level, msg)
 
-    log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（原生，无 bash）")
+    log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（Clash Verge 解锁逻辑）")
     data = run_quality_probe(cfg, _probe_log)
 
     if not data or not data.get("Head", {}).get("IP"):
@@ -168,17 +156,16 @@ def _run_inner(cfg: dict) -> int:
 
     scam, abuse, ipqs, ip2l, fraud = map(_clean, (scam, abuse, ipqs, ip2l, fraud))
 
-    nf = _format_media_iso(data, "Netflix")
-    yt = _format_media_iso(data, "Youtube")
-    dp = _format_media_iso(data, "DisneyPlus")
-    tk = _format_media_iso(data, "TikTok")
-    gpt = _format_media_iso(data, "ChatGPT")
-    apv = _format_media_iso(data, "AmazonPrimeVideo")
+    unlock_lines = "\n".join(
+        f"• **{label}:** {_format_media_iso(data, key)}"
+        for key, label in _UNLOCK_LINES
+    )
 
-    raw_yt_reg = data.get("Media", {}).get("Youtube", {}).get("Region", "")
-    raw_yt_stat = data.get("Media", {}).get("Youtube", {}).get("Status", "")
+    yt = data.get("Media", {}).get("YoutubePremium", {})
+    raw_yt_reg = yt.get("Region", "")
+    raw_yt_stat = yt.get("Status", "")
     raw_nf = data.get("Media", {}).get("Netflix", {}).get("Status", "Unknown")
-    raw_gpt = data.get("Media", {}).get("ChatGPT", {}).get("Status", "未知")
+    raw_gpt = data.get("Media", {}).get("ChatGPT_Web", {}).get("Status", "未知")
 
     warning = _google_cn_warning(data)
 
@@ -203,7 +190,7 @@ def _run_inner(cfg: dict) -> int:
             _format_score_label("IPAPI 风险率", str(fraud)),
         ]
     )
-    score_note = _scores_footnote(str(scam), str(abuse), str(ipqs), str(ip2l), str(fraud))
+    score_note = _scores_footnote(str(scam), str(abuse), str(ipqs), str(ip2l))
 
     report = f"""🎯 *IP-Sentinel IP 质量报告*
 📍 节点：`{safe_alias}`
@@ -212,20 +199,14 @@ def _run_inner(cfg: dict) -> int:
 *🛡️ 风险评分 (越低越好)*
 {score_lines}{score_note}
 
-*🎬 核心业务解锁* _(ISO 3166-1)_
-• **YouTube:** {yt}
-• **Netflix:** {nf}
-• **Disney+:** {dp}
-• **PrimeVideo:** {apv}
-• **TikTok:** {tk}
-• **ChatGPT:** {gpt}
+*🎬 核心业务解锁* _(ISO 3166-1 · Clash Verge)_
+{unlock_lines}
 
 *✉️ 邮局与污染度*
 • **25 端口出站:** {p25}
 • **DNS 污染库:** 严重 `{dns_b}` | 轻微 `{dns_m}`
 
 _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{link_ip})_
-_⚙️ 探针: Python 原生 · 流媒体并行检测_
 
 ⏱️ `{now}` | ⚙️ `v{local_ver}`"""
 
