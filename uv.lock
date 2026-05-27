@@ -92,20 +92,20 @@ wheels = [
 name = "ip-sentinel"
 version = "4.1.1"
 source = { virtual = "." }
+dependencies = [
+    { name = "playwright" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "ruff" },
 ]
-maps = [
-    { name = "playwright" },
-]
 
 [package.metadata]
+requires-dist = [{ name = "playwright", specifier = ">=1.49" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.9" }]
-maps = [{ name = "playwright", specifier = ">=1.49" }]
 
 [[package]]
 name = "playwright"

@@ -6,6 +6,8 @@ import random
 from collections.abc import Callable
 from typing import Any
 
+from playwright.sync_api import sync_playwright
+
 LogFn = Callable[[str, str], None]
 
 
@@ -34,13 +36,8 @@ def visit_google_maps(
     """
     使用 Chromium 打开 Maps，并通过浏览器 Geolocation 返回指定经纬度（非 GPS 真值）。
 
-    返回: ok | skip (未安装 playwright/浏览器) | error:...
+    返回: ok | error:...
     """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return "skip"
-
     dwell = dwell_sec if dwell_sec is not None else random.randint(45, 75)
 
     def _log(level: str, msg: str) -> None:
@@ -88,5 +85,5 @@ def visit_google_maps(
 
 
 def maps_geo_enabled(cfg: dict[str, Any]) -> str:
-    """auto | true | false"""
-    return str(cfg.get("ENABLE_MAPS_GEO", "auto")).strip().lower() or "auto"
+    """true | auto | false — true 失败不回退 HTTP；auto 失败回退；false 仅 HTTP"""
+    return str(cfg.get("ENABLE_MAPS_GEO", "true")).strip().lower() or "true"

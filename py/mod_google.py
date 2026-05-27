@@ -96,14 +96,12 @@ def run(cfg: dict | None = None) -> int:
                         "INFO ",
                         f"Maps 已用 Chromium Geolocation 定位至搜索坐标: {action_lat}, {action_lon}",
                     )
-                elif geo_result == "skip":
-                    log(cfg, MODULE, "WARN ", "未安装 Playwright/Chromium，Maps 回退为 HTTP 访问。")
                 else:
                     log(cfg, MODULE, "WARN ", f"Maps 浏览器访问失败 ({geo_result})，回退为 HTTP。")
 
             if code != 200:
-                if maps_geo_mode == "true" and code == 0:
-                    log(cfg, MODULE, "ERROR", "ENABLE_MAPS_GEO=true 但浏览器不可用，跳过 Maps。")
+                if maps_geo_mode == "true":
+                    log(cfg, MODULE, "ERROR", f"Maps 浏览器定位失败 ({geo_result})，已跳过 HTTP 回退。")
                 else:
                     code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
         else:

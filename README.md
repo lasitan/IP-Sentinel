@@ -17,7 +17,7 @@ Telegram 频道：[IP-Sentinel Matrix](https://t.me/IP_Sentinel_Matrix)
 - **OTA 升级**：私有 Master 可向 Agent 下发远程升级；Master 自身也支持 OTA（可选）。
 - **配置热升级**：安装脚本从远端读取版本号，已安装节点可保留配置直接升级。
 - **数据流水线**：GitHub Actions 定期更新 UA 库、区域关键词与信任站点列表。
-- **Google Maps 定位**：可选 Chromium（Playwright）访问 Maps，通过浏览器 Geolocation API 返回与搜索 URL 一致的虚拟坐标（见 `ENABLE_MAPS_GEO`）。
+- **Google Maps 定位**：依赖 Playwright + Chromium，通过浏览器 Geolocation API 返回与搜索 URL 一致的虚拟坐标（`ENABLE_MAPS_GEO`，默认开启）。
 - **UTC 调度**：默认每 20 分钟执行维护，按部署时间错峰，减轻 API 压力。
 - **网络容错**：出站接口绑定、快速连通性检测与多级回退，适配 NAT / 双栈环境。
 - **HMAC 签名**：Agent Webhook 指令带时间戳与 HMAC-SHA256（60 秒有效）。
@@ -44,17 +44,12 @@ IP-Sentinel/
 
 ```bash
 uv sync
+uv run playwright install chromium
 uv run python py/mod_google.py
 make lint
 ```
 
-Maps 浏览器定位（可选，需额外依赖与 Chromium）：
-
-```bash
-uv sync --group maps
-uv run playwright install chromium
-# config.conf: ENABLE_MAPS_GEO=auto   # auto | true | false
-```
+生产 Agent 安装脚本会在 `uv sync` 后自动执行 `playwright install chromium`。`config.conf` 中 `ENABLE_MAPS_GEO=true`（默认）强制使用浏览器定位；设为 `false` 可退回纯 HTTP 访问 Maps。
 
 - Python 版本：`.python-version`（默认 3.12）
 - 锁文件：`uv.lock`

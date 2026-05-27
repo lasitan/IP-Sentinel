@@ -104,6 +104,19 @@ uv_sync_project() {
     return 0
 }
 
+install_playwright_chromium() {
+    local root="$1"
+    echo "⏳ 正在安装 Playwright Chromium（Google Maps 定位必需）..."
+    (cd "$root" && "$UV_BIN" run playwright install-deps chromium) 2>/dev/null || true
+    if ! (cd "$root" && "$UV_BIN" run playwright install chromium); then
+        echo -e "\033[31m❌ Playwright Chromium 安装失败。\033[0m"
+        echo -e "💡 请手动执行: cd ${root} && ${UV_BIN} run playwright install-deps && ${UV_BIN} run playwright install chromium"
+        return 1
+    fi
+    echo -e "\033[32m✅ Playwright Chromium 已就绪。\033[0m"
+    return 0
+}
+
 # 从远端获取 Agent 版本号
 TARGET_VERSION=$( (curl -fsSL --connect-timeout 5 --retry 2 "${REPO_RAW_URL}/version.txt" || curl -4 -fsSL --connect-timeout 5 --retry 2 "${REPO_RAW_URL}/version.txt") 2>/dev/null | grep "^AGENT_VERSION=" | cut -d'=' -f2 | tr -d '[:space:]')
 TARGET_VERSION=${TARGET_VERSION:-"4.1.1"}
@@ -581,7 +594,7 @@ NODE_NAME="$NODE_NAME"
 NODE_ALIAS="$NODE_ALIAS"
 
 ENABLE_OTA="$ENABLE_OTA"
-ENABLE_MAPS_GEO="auto"
+ENABLE_MAPS_GEO="true"
 EOF
 
     chmod 600 "$CONFIG_FILE"
@@ -645,7 +658,7 @@ if [ "$UPGRADE_MODE" == "true" ]; then
         ENABLE_OTA=$(grep "^ENABLE_OTA=" "$CONFIG_FILE" | cut -d'"' -f2)
     fi
     if ! grep -q "^ENABLE_MAPS_GEO=" "$CONFIG_FILE"; then
-        echo "ENABLE_MAPS_GEO=\"auto\"" >> "$CONFIG_FILE"
+        echo "ENABLE_MAPS_GEO=\"true\"" >> "$CONFIG_FILE"
     fi
 fi
 
@@ -714,6 +727,7 @@ mv "${SECURE_TMP}/.python-version" "${INSTALL_DIR}/.python-version"
 
 ensure_uv
 uv_sync_project "${INSTALL_DIR}" || exit 1
+install_playwright_chromium "${INSTALL_DIR}" || exit 1
 
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/user_agents.txt" -o "${INSTALL_DIR}/data/user_agents.txt"
 if [ "$UPGRADE_MODE" == "false" ]; then
