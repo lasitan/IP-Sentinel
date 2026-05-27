@@ -15,27 +15,49 @@ from tg_util import build_svq_callback, escape_markdown, tg_post
 
 MODULE = "Quality"
 
+_ISO_CC_RE = re.compile(r"^[A-Z]{2}$")
 
-def _parse_media(data: dict, key: str) -> str:
+
+def _resolve_media_iso(data: dict, key: str) -> str:
+    """从探针结果解析 ISO 3166-1 alpha-2 国家码."""
+    media = data.get("Media", {}).get(key, {})
+    status = media.get("Status", "")
+    reg = (media.get("Region") or "").strip().upper()
+    if reg in ("中国", "CHINA"):
+        return "CN"
+    if _ISO_CC_RE.match(reg):
+        return reg
+    if status == "中国":
+        return "CN"
+    g = data.get("GoogleGeo", {})
+    if key == "Youtube" and g.get("premium"):
+        cc = str(g["premium"]).upper()
+        if _ISO_CC_RE.match(cc):
+            return cc
+    if key in ("Youtube", "TikTok") and g.get("ipCountry"):
+        cc = str(g["ipCountry"]).upper()
+        if _ISO_CC_RE.match(cc):
+            return cc
+    return "--"
+
+
+def _format_media_iso(data: dict, key: str) -> str:
+    """核心业务解锁：仅用 ISO 国家码 + 状态色标."""
     media = data.get("Media", {}).get(key, {})
     status = media.get("Status", "未知")
-    reg = media.get("Region", "")
-    typ = media.get("Type", "")
+    iso = escape_markdown(_resolve_media_iso(data, key))
+
     if status == "仅自制":
-        label = escape_markdown(reg) if reg else "有区服"
-        return f"🟡 仅自制剧 ({label})"
+        return f"🟡 `{iso}`"
     if "解锁" in status:
-        parts = [escape_markdown(reg)] if reg else []
-        if typ:
-            parts.append(escape_markdown(typ))
-        label = " / ".join(parts) if parts else "可访问"
-        return f"🟢 {label}"
-    if any(x in status for x in ("仅", "机房", "待支持", "待确认", "无Premium")):
-        extra = f" {escape_markdown(reg)}" if reg else ""
-        return f"🟡 {escape_markdown(status)}{extra}"
-    if any(x in status for x in ("屏蔽", "失败", "中国", "禁", "未解锁")):
-        return f"🔴 {escape_markdown(status)}"
-    return f"⚪ {escape_markdown(status)}"
+        return f"🟢 `{iso}`"
+    if status == "中国" or iso == "CN":
+        return "🔴 `CN`"
+    if any(x in status for x in ("屏蔽", "失败", "未解锁", "禁")):
+        return f"🔴 `{iso}`"
+    if any(x in status for x in ("仅", "待确认", "无Premium", "探测失败")):
+        return f"🟡 `{iso}`"
+    return f"⚪ `{iso}`"
 
 
 def _google_cn_warning(data: dict) -> str:
@@ -112,15 +134,8 @@ def _run_inner(cfg: dict) -> int:
         log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (无有效结果) ==========")
         return 1
 
-    info = data.get("Info", {})
     head = data.get("Head", {})
     ip_addr = head.get("IP", "")
-    asn = escape_markdown(info.get("ASN", "Unknown"))
-    org = escape_markdown(info.get("Organization", "Unknown"))
-    city = escape_markdown(info.get("City", {}).get("Name", "Unknown"))
-    country = escape_markdown(info.get("Region", {}).get("Name", "Unknown"))
-    ip_type = escape_markdown(info.get("Type", "未知属性"))
-    usage = escape_markdown(data.get("Type", {}).get("Usage", {}).get("IPinfo", "未知场景"))
 
     scores = data.get("Score", {})
     scam = scores.get("SCAMALYTICS") or "N/A"
@@ -134,20 +149,12 @@ def _run_inner(cfg: dict) -> int:
 
     scam, abuse, ipqs, ip2l, fraud = map(_clean, (scam, abuse, ipqs, ip2l, fraud))
 
-    is_proxy = "🟢 干净"
-    factor = data.get("Factor", {})
-    for section in ("Proxy", "VPN"):
-        sec = factor.get(section, {})
-        if isinstance(sec, dict) and any(v is True for v in sec.values()):
-            is_proxy = "🟡 疑似代理/VPN"
-            break
-
-    nf = _parse_media(data, "Netflix")
-    yt = _parse_media(data, "Youtube")
-    dp = _parse_media(data, "DisneyPlus")
-    tk = _parse_media(data, "TikTok")
-    gpt = _parse_media(data, "ChatGPT")
-    apv = _parse_media(data, "AmazonPrimeVideo")
+    nf = _format_media_iso(data, "Netflix")
+    yt = _format_media_iso(data, "Youtube")
+    dp = _format_media_iso(data, "DisneyPlus")
+    tk = _format_media_iso(data, "TikTok")
+    gpt = _format_media_iso(data, "ChatGPT")
+    apv = _format_media_iso(data, "AmazonPrimeVideo")
 
     raw_yt_reg = data.get("Media", {}).get("Youtube", {}).get("Region", "")
     raw_yt_stat = data.get("Media", {}).get("Youtube", {}).get("Status", "")
@@ -155,14 +162,6 @@ def _run_inner(cfg: dict) -> int:
     raw_gpt = data.get("Media", {}).get("ChatGPT", {}).get("Status", "未知")
 
     warning = _google_cn_warning(data)
-    ggeo = data.get("GoogleGeo", {})
-    geo_line = ""
-    if ggeo:
-        geo_line = (
-            f"\n**Google 三核:** Jump `{escape_markdown(ggeo.get('jump') or '?')}` | "
-            f"YT `{escape_markdown(ggeo.get('premium') or '?')}` | "
-            f"Music `{escape_markdown(ggeo.get('music') or '?')}`"
-        )
 
     mail = data.get("Mail", {})
     p25 = _port25_label(mail)
@@ -190,16 +189,10 @@ def _run_inner(cfg: dict) -> int:
 📍 节点：`{safe_alias}`
 🌐 地址：`{safe_ip}`{warning}
 
-*🏢 物理身份与网络属性*
-`AS{asn}` | `{org}`
-**定位:** `{country} - {city}`
-**属性:** `{ip_type}` | `{usage}`
-**探针:** {is_proxy}{geo_line}
-
 *🛡️ 风险评分 (越低越好)*
 {score_lines}
 
-*🎬 核心业务解锁*
+*🎬 核心业务解锁* _(ISO 3166-1)_
 • **YouTube:** {yt}
 • **Netflix:** {nf}
 • **Disney+:** {dp}
