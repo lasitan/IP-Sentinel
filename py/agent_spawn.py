@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -41,8 +42,18 @@ def spawn_py_script(
     install = cfg.get("INSTALL_DIR", DEFAULT_INSTALL_DIR)
     spawn_log = Path(install) / "logs" / "spawn.log"
     spawn_log.parent.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "IP_SENTINEL_INSTALL_DIR": install}
-    cmd: list[str] = [sys.executable, str(path)]
+    env = {
+        **os.environ,
+        "IP_SENTINEL_INSTALL_DIR": install,
+        "IP_SENTINEL_CONFIG": f"{install.rstrip('/')}/config.conf",
+    }
+    rel = f"py/{script}"
+    uv_bin = shutil.which("uv") or "/usr/local/bin/uv"
+    proj = Path(install) / "pyproject.toml"
+    if uv_bin and proj.is_file():
+        cmd = [uv_bin, "run", "--directory", install, "python", rel]
+    else:
+        cmd = [sys.executable, str(path)]
     if nice:
         cmd = ["nice", "-n", "19", *cmd]
     with open(spawn_log, "a", encoding="utf-8") as logf:

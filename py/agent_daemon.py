@@ -11,9 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import load_config
+from config import default_install_dir, load_config
 
-INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", "/opt/ip_sentinel")
+INSTALL_DIR = default_install_dir()
 
 
 def _detect_public_ip(ip_pref: str) -> str:

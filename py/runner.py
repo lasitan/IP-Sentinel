@@ -10,10 +10,23 @@ import sys
 import time
 
 from agent_spawn import resolve_py_script, spawn_py_script
-from config import require_config
+from config import default_install_dir, require_config
 from log_util import log
 
 LOCK_PATH = "/tmp/ip_sentinel_runner.lock"
+
+
+def _bootstrap_log(message: str) -> None:
+    """cron 在 require_config 失败等场景仍写入日志."""
+    try:
+        install = default_install_dir()
+        log_path = os.path.join(install, "logs", "sentinel.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        ts = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [SYSTEM ] [ERROR] {message}\n")
+    except OSError:
+        pass
 
 
 def _acquire_lock(cfg: dict) -> int | None:
@@ -46,7 +59,13 @@ def _pick_module(cfg: dict) -> tuple[str, str] | None:
 
 
 def run() -> int:
-    cfg = require_config()
+    try:
+        cfg = require_config()
+    except SystemExit as exc:
+        _bootstrap_log(f"runner 启动失败: {exc}")
+        return 1
+
+    log(cfg, "SYSTEM", "INFO ", "主控 runner 已唤醒（定时或手动触发）")
     lock_fd = _acquire_lock(cfg)
     if lock_fd is None:
         return 0

@@ -1,16 +1,35 @@
-"""加载 /opt/ip_sentinel/config.conf 运行时配置."""
+"""加载 config.conf 运行时配置."""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
-DEFAULT_INSTALL_DIR = "/opt/ip_sentinel"
-DEFAULT_CONFIG_PATH = f"{DEFAULT_INSTALL_DIR}/config.conf"
+_LEGACY_INSTALL = "/opt/ip_sentinel"
+_PKG_ROOT = Path(__file__).resolve().parent.parent
+
+
+def default_install_dir() -> str:
+    if install := os.environ.get("IP_SENTINEL_INSTALL_DIR"):
+        return install.rstrip("/")
+    if (_PKG_ROOT / "config.conf").is_file():
+        return str(_PKG_ROOT)
+    return _LEGACY_INSTALL
+
+
+def default_config_path() -> str:
+    if p := os.environ.get("IP_SENTINEL_CONFIG"):
+        return p
+    return f"{default_install_dir()}/config.conf"
+
+
+DEFAULT_INSTALL_DIR = default_install_dir()
+DEFAULT_CONFIG_PATH = default_config_path()
 
 
 def load_config(path: str | None = None) -> dict[str, Any]:
-    cfg_path = path or os.environ.get("IP_SENTINEL_CONFIG", DEFAULT_CONFIG_PATH)
+    cfg_path = path or default_config_path()
     cfg: dict[str, Any] = {}
     if not os.path.isfile(cfg_path):
         return cfg
@@ -32,7 +51,7 @@ def load_config(path: str | None = None) -> dict[str, Any]:
 def require_config(path: str | None = None) -> dict[str, Any]:
     cfg = load_config(path)
     if not cfg:
-        install = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
+        install = default_install_dir()
         log_file = f"{install}/logs/sentinel.log"
         try:
             os.makedirs(os.path.dirname(log_file), exist_ok=True)

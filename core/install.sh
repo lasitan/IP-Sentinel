@@ -797,6 +797,7 @@ pkill -9 -f "sentinel_scheduler.sh" >/dev/null 2>&1 || true
 mkdir -p "${INSTALL_DIR}/core"
 mv "$TMP_UNINSTALL" "${INSTALL_DIR}/core/uninstall.sh"
 chmod +x "${INSTALL_DIR}/core/uninstall.sh"
+curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/cron_task.sh" -o "${INSTALL_DIR}/core/cron_task.sh" 2>/dev/null || true
 # 清理历史遗留的 Bash 逻辑脚本
 for LEGACY_SH in runner.sh updater.sh tg_report.sh agent_daemon.sh mod_google.sh mod_trust.sh mod_quality.sh; do
     rm -f "${INSTALL_DIR}/core/${LEGACY_SH}" 2>/dev/null
@@ -826,6 +827,26 @@ fi
 # ==========================================================
 echo -e "\n[7/7] 正在注入系统守护进程与调度器..."
 
+deploy_cron_task_wrapper() {
+    local dst="${INSTALL_DIR}/core/cron_task.sh"
+    if [ ! -f "$dst" ]; then
+        curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/cron_task.sh" -o "$dst" 2>/dev/null || true
+    fi
+    if [ ! -s "$dst" ]; then
+        echo -e "\033[33m⚠️ 未找到 cron_task.sh，定时任务可能无法写日志。\033[0m"
+        return 1
+    fi
+    sed -e "s|__INSTALL_DIR__|${INSTALL_DIR}|g" \
+        -e "s|__UV_BIN__|${UV_BIN}|g" \
+        -e "s|__UV_PATH__|${UV_PATH}|g" \
+        "$dst" > "${dst}.tmp" && mv "${dst}.tmp" "$dst"
+    chmod +x "$dst"
+    return 0
+}
+
+CRON_TASK="${INSTALL_DIR}/core/cron_task.sh"
+deploy_cron_task_wrapper || true
+
 DEPLOY_UTC_HOUR=$(date -u +%H)
 DEPLOY_UTC_MIN=$(date -u +%M)
 
@@ -840,10 +861,12 @@ Description=IP-Sentinel Runner Service
 After=network.target
 [Service]
 Environment="PATH=${UV_PATH}"
+Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
+Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
 SyslogIdentifier=ip-sentinel
 Type=oneshot
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${UV_BIN} run python py/runner.py
+ExecStart=${CRON_TASK} py/runner.py
 User=root
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
@@ -867,10 +890,12 @@ Description=IP-Sentinel Updater Service
 After=network.target
 [Service]
 Environment="PATH=${UV_PATH}"
+Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
+Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
 SyslogIdentifier=ip-sentinel
 Type=oneshot
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${UV_BIN} run python py/updater.py
+ExecStart=${CRON_TASK} py/updater.py
 User=root
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
@@ -897,10 +922,12 @@ Description=IP-Sentinel Telegram Report Service
 After=network.target
 [Service]
 Environment="PATH=${UV_PATH}"
+Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
+Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
 SyslogIdentifier=ip-sentinel
 Type=oneshot
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${UV_BIN} run python py/report.py
+ExecStart=${CRON_TASK} py/report.py
 User=root
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
@@ -922,10 +949,12 @@ Description=IP-Sentinel Agent Daemon Service
 After=network.target
 [Service]
 Environment="PATH=${UV_PATH}"
+Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
+Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
 SyslogIdentifier=ip-sentinel
 Type=simple
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${UV_BIN} run python py/agent_daemon.py
+ExecStart=${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py
 Restart=always
 RestartSec=5
 User=root
@@ -965,17 +994,24 @@ EOF
 
             cat > ${INSTALL_DIR}/core/sentinel_scheduler.sh << EOF
 #!/bin/bash
+# Alpine 受限环境：每 20 分钟 runner，避免仅匹配 00/20/40 分漏跑
+INSTALL_DIR="${INSTALL_DIR}"
+CRON_TASK="${CRON_TASK}"
+UV_BIN="${UV_BIN}"
+LAST_RUNNER=0
 while true; do
+    NOW=\$(date +%s)
+    if [ \$((NOW - LAST_RUNNER)) -ge 1200 ]; then
+        "\$CRON_TASK" py/runner.py
+        LAST_RUNNER=\$NOW
+    fi
     MIN=\$(date -u +%M)
     HOUR=\$(date -u +%H)
-    if [ "\$MIN" == "00" ] || [ "\$MIN" == "20" ] || [ "\$MIN" == "40" ]; then
-        ${UV_BIN} run --directory ${INSTALL_DIR} python py/runner.py >/dev/null 2>&1
-    fi
     if [ "\$HOUR" == "${DEPLOY_UTC_HOUR}" ] && [ "\$MIN" == "${DEPLOY_UTC_MIN}" ]; then
-        ${UV_BIN} run --directory ${INSTALL_DIR} python py/updater.py >/dev/null 2>&1
+        "\$CRON_TASK" py/updater.py
     fi
     if [ "\$HOUR" == "16" ] && [ "\$MIN" == "00" ]; then
-        ${UV_BIN} run --directory ${INSTALL_DIR} python py/report.py >/dev/null 2>&1
+        "\$CRON_TASK" py/report.py
     fi
     if ! pgrep -f 'ip_sentinel/py/webhook.py' >/dev/null && ! pgrep -f 'webhook.py' >/dev/null; then
         ${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &
@@ -998,11 +1034,11 @@ EOF
             
         else
             crontab -l 2>/dev/null | grep -v "ip_sentinel" > "${SECURE_TMP}/cron_backup" || true
-            echo "*/20 * * * * ${UV_BIN} run --directory ${INSTALL_DIR} python py/runner.py >/dev/null 2>&1" >> "${SECURE_TMP}/cron_backup"
-            echo "${DEPLOY_UTC_MIN} ${DEPLOY_UTC_HOUR} * * * ${UV_BIN} run --directory ${INSTALL_DIR} python py/updater.py >/dev/null 2>&1" >> "${SECURE_TMP}/cron_backup"
+            echo "*/20 * * * * ${CRON_TASK} py/runner.py" >> "${SECURE_TMP}/cron_backup"
+            echo "${DEPLOY_UTC_MIN} ${DEPLOY_UTC_HOUR} * * * ${CRON_TASK} py/updater.py" >> "${SECURE_TMP}/cron_backup"
             
             if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
-                echo "0 16 * * * ${UV_BIN} run --directory ${INSTALL_DIR} python py/report.py >/dev/null 2>&1" >> "${SECURE_TMP}/cron_backup"
+                echo "0 16 * * * ${CRON_TASK} py/report.py" >> "${SECURE_TMP}/cron_backup"
                 echo "$SAFE_PUBLIC_IP" > "${INSTALL_DIR}/core/.last_ip"
                 DAEMON_IP=$( (curl -s -m 5 api.ip.sb/ip || curl -s -m 5 ifconfig.me) 2>/dev/null | tr -d '[:space:]' )
                 [ -n "$DAEMON_IP" ] && echo "$DAEMON_IP" > "${INSTALL_DIR}/core/.last_ip" || echo "$(echo "$SAFE_PUBLIC_IP" | tr -d '[]')" > "${INSTALL_DIR}/core/.last_ip"
@@ -1115,7 +1151,8 @@ else
     echo "🎉 Agent 安装完成。"
 fi
 echo "📍 区域: $REGION_NAME"
-echo "⚙️ 定时任务: 每 20 分钟执行一次维护。"
+echo "⚙️ 定时任务: 每 20 分钟执行一次维护（日志: ${INSTALL_DIR}/logs/scheduler.log）。"
+echo "📊 日报推送: 每天 UTC 16:00（需已配置 TG）；可用 Master 手动 /trigger_report。"
 if [[ -n "$TG_TOKEN" ]]; then
     echo "📡 Webhook 已启动 (端口: $AGENT_PORT)，已向 Master 发送注册消息。"
     
