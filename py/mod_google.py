@@ -25,12 +25,30 @@ from maps_browser import (
 )
 from network import build_curl_context, fetch_headers, fetch_text, http_status
 from persona import load_lines, pick_browser_ua, pick_session_ua, random_coord, uri_encode_keyword
+from task_lock import acquire_maintenance_lock, maintenance_busy, release_maintenance_lock
 
 MODULE = "Google"
 
 
 def run(cfg: dict | None = None) -> int:
     cfg = cfg or require_config()
+    if not acquire_maintenance_lock():
+        _, holder = maintenance_busy()
+        log(
+            cfg,
+            MODULE,
+            "WARN ",
+            f"已有维护任务运行中 (pid={holder})，跳过本次 Google 纠偏。",
+        )
+        return 0
+
+    try:
+        return _run_locked(cfg)
+    finally:
+        release_maintenance_lock()
+
+
+def _run_locked(cfg: dict) -> int:
     install = cfg["INSTALL_DIR"]
     region_name = cfg.get("REGION_NAME", cfg.get("REGION_CODE", ""))
 

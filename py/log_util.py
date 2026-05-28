@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import re
 import shutil
@@ -74,6 +75,28 @@ def format_core_msg(cfg: dict[str, Any], module: str, level: str, message: str) 
     return f"[v{ver:<5}] [{level:<5}] [{module:<7}] [{region}] {message}"
 
 
+def tail_log_file(
+    log_path: str | Path,
+    *,
+    max_lines: int = 15,
+    max_bytes: int = 256_000,
+) -> str:
+    """读取日志尾部，避免整文件读入内存；不阻塞其他进程的追加写入."""
+    path = Path(log_path)
+    if not path.is_file():
+        return ""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            blob = f.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return ""
+    lines = blob.splitlines()
+    return "\n".join(lines[-max_lines:])
+
+
 def log(cfg: dict[str, Any], module: str, level: str, message: str) -> None:
     _ensure_log_dir(cfg)
     core_msg = format_core_msg(cfg, module, level, message)
@@ -82,7 +105,15 @@ def log(cfg: dict[str, Any], module: str, level: str, message: str) -> None:
     log_file = cfg.get("LOG_FILE", "")
     if log_file:
         with open(log_file, "a", encoding="utf-8") as f:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            except (OSError, AttributeError):
+                pass
             f.write(line)
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except (OSError, AttributeError):
+                pass
     if shutil.which("logger"):
         subprocess.run(["logger", "-t", "ip-sentinel", core_msg], check=False)
     else:
@@ -99,5 +130,13 @@ def log_trust(cfg: dict[str, Any], level: str, message: str) -> None:
     log_file = cfg.get("LOG_FILE", "")
     if log_file:
         with open(log_file, "a", encoding="utf-8") as f:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            except (OSError, AttributeError):
+                pass
             f.write(line)
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except (OSError, AttributeError):
+                pass
         print(line.rstrip())

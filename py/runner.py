@@ -12,6 +12,7 @@ import time
 from agent_spawn import resolve_py_script, spawn_py_script
 from config import default_install_dir, require_config
 from log_util import log
+from task_lock import maintenance_busy
 
 LOCK_PATH = "/tmp/ip_sentinel_runner.lock"
 
@@ -79,6 +80,15 @@ def run() -> int:
             time.sleep(jitter)
 
         log(cfg, "SYSTEM", "INFO", "休眠结束，开始计算本轮任务轮盘...")
+        busy, holder = maintenance_busy()
+        if busy:
+            log(
+                cfg,
+                "SYSTEM",
+                "INFO",
+                f"已有维护任务运行中 (pid={holder})，跳过本轮定时调度。",
+            )
+            return 0
         picked = _pick_module(cfg)
         if not picked:
             log(cfg, "SYSTEM", "WARN", "未启用任何维护模块，跳过本轮。")

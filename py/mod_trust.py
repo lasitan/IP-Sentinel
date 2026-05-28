@@ -15,6 +15,7 @@ from config import require_config
 from log_util import log_trust
 from network import build_curl_context, http_status
 from persona import load_lines, pick_session_ua
+from task_lock import acquire_maintenance_lock, maintenance_busy, release_maintenance_lock
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 FALLBACK_URLS = [
@@ -78,6 +79,18 @@ def load_trust_urls(cfg: dict) -> list[str]:
 
 def run(cfg: dict | None = None) -> int:
     cfg = cfg or require_config()
+    if not acquire_maintenance_lock():
+        _, holder = maintenance_busy()
+        log_trust(cfg, "WARN ", f"已有维护任务运行中 (pid={holder})，跳过本次信用净化。")
+        return 0
+
+    try:
+        return _run_locked(cfg)
+    finally:
+        release_maintenance_lock()
+
+
+def _run_locked(cfg: dict) -> int:
     region = cfg.get("REGION_CODE", "US")
 
     def _log(level: str, msg: str) -> None:

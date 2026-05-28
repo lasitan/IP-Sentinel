@@ -18,6 +18,7 @@ import socketserver
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -26,6 +27,8 @@ from pathlib import Path
 from agent_spawn import spawn_py_script
 from config import DEFAULT_INSTALL_DIR
 from log_util import log as agent_log
+from log_util import tail_log_file
+from task_lock import maintenance_busy
 
 PY_DIR = Path(__file__).resolve().parent
 INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
@@ -145,9 +148,21 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if req_path == "/trigger_log":
-            self._webhook_log("INFO ", "收到 Master 指令: 拉取日志 (/trigger_log)")
+            busy, holder = maintenance_busy()
+            if busy:
+                self._webhook_log(
+                    "INFO ",
+                    f"收到拉取日志请求；维护任务进行中 (pid={holder})，仅读取日志不启动新任务。",
+                )
+            else:
+                self._webhook_log("INFO ", "收到 Master 指令: 拉取日志 (/trigger_log)")
             self._ok(b"Action Accepted: fetch_log\n")
-            self._handle_log()
+            cfg_snapshot = self._cfg()
+            threading.Thread(
+                target=self._handle_log_async,
+                args=(cfg_snapshot,),
+                daemon=True,
+            ).start()
             return
 
         if req_path == "/trigger_quality":
@@ -202,17 +217,13 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(f"503 Service Unavailable: {script} missing\n".encode())
 
-    def _handle_log(self) -> None:
-        cfg = self._cfg()
+    def _handle_log_async(self, cfg: dict[str, str]) -> None:
+        """后台拉日志，避免阻塞 HTTPS 线程；不启动任何维护子进程."""
         try:
             install = cfg.get("INSTALL_DIR", INSTALL_DIR)
             log_path = f"{install}/logs/sentinel.log"
-            log_data = "日志文件不存在或为空"
-            if os.path.isfile(log_path):
-                with open(log_path, encoding="utf-8", errors="ignore") as f:
-                    lines = f.readlines()
-                if lines:
-                    log_data = html.escape("".join(lines[-15:]))
+            tail = tail_log_file(log_path, max_lines=15)
+            log_data = html.escape(tail) if tail else "日志文件不存在或为空"
 
             ver = cfg.get("AGENT_VERSION", "未知")
             alias = cfg.get("NODE_ALIAS", cfg.get("NODE_NAME", "Unknown-Node"))
@@ -230,7 +241,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             }
             api_url = cfg.get("TG_API_URL", "")
             if not api_url or not cfg.get("CHAT_ID"):
-                self._webhook_log("ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
+                agent_log(cfg, "Webhook", "ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
                 return
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -244,11 +255,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = resp.read().decode(errors="ignore")
                 if '"ok":true' in body:
-                    self._webhook_log("INFO ", "实时日志已推送至 Telegram")
+                    agent_log(cfg, "Webhook", "INFO ", "实时日志已推送至 Telegram")
                 else:
-                    self._webhook_log("WARN ", f"Telegram 返回异常: {body[:200]}")
+                    agent_log(cfg, "Webhook", "WARN ", f"Telegram 返回异常: {body[:200]}")
         except Exception as exc:
-            self._webhook_log("ERROR", f"拉取日志推送失败: {exc}")
+            agent_log(cfg, "Webhook", "ERROR", f"拉取日志推送失败: {exc}")
 
     def _handle_rename(self, query: dict) -> None:
         self._webhook_log("INFO ", "收到 Master 指令: 重命名节点 (/trigger_rename)")

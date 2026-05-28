@@ -10,6 +10,7 @@ from pathlib import Path
 
 from config import DEFAULT_INSTALL_DIR, load_config
 from log_util import log
+from task_lock import is_maintenance_script, maintenance_busy
 
 _PY_DIR = Path(__file__).resolve().parent
 
@@ -39,6 +40,17 @@ def spawn_py_script(
     if not path:
         log(cfg, log_module, "ERROR", f"未找到脚本 {script}，无法启动任务")
         return False
+
+    if is_maintenance_script(script):
+        busy, holder = maintenance_busy()
+        if busy:
+            log(
+                cfg,
+                log_module,
+                "WARN ",
+                f"维护任务进行中 (pid={holder})，拒绝重复启动: {script}",
+            )
+            return False
     install = cfg.get("INSTALL_DIR", DEFAULT_INSTALL_DIR)
     spawn_log = Path(install) / "logs" / "spawn.log"
     spawn_log.parent.mkdir(parents=True, exist_ok=True)
