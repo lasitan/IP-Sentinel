@@ -21,18 +21,16 @@ _NON_COUNTRY_ISO = frozenset({"ZH", "EN"})
 # 报告展示顺序: (Media 键, 显示名)
 _UNLOCK_LINES = (
     ("YoutubePremium", "YouTube Premium"),
-    ("Netflix", "Netflix"),
+    ("GooglePlay", "Google Play"),
     ("Gemini", "Gemini"),
-    ("TikTok", "TikTok"),
-    ("ChatGPT_iOS", "ChatGPT iOS"),
-    ("ChatGPT_Web", "ChatGPT Web"),
-    ("Claude", "Claude"),
 )
 
 
 def _valid_iso(cc: str) -> str:
     c = (cc or "").strip().upper()
     if _ISO_CC_RE.match(c) and c not in _NON_COUNTRY_ISO:
+        return c
+    if len(c) == 3 and c.isalpha():
         return c
     return ""
 
@@ -42,6 +40,8 @@ def _resolve_media_iso(data: dict, key: str) -> str:
     reg = _valid_iso(media.get("Region") or "")
     if reg:
         return reg
+    if key == "Gemini":
+        return "--"
     return _valid_iso(data.get("ipCountry", "")) or "--"
 
 
@@ -50,24 +50,28 @@ def _format_media_iso(data: dict, key: str) -> str:
     status = media.get("Status", "未知")
     iso = escape_markdown(_resolve_media_iso(data, key))
 
-    if status == "仅自制":
-        return f"🟡 `{iso}`"
+    if status == "送中":
+        return "🟡 `CN`"
+    if status == "N/A":
+        return "⚪ `N/A`"
     if status == "解锁":
         return f"🟢 `{iso}`"
-    if status in ("未解锁", "屏蔽", "地区不可用", "ISP限制") or iso == "CN":
+    if status == "失败" or iso == "CN":
         if iso == "CN":
             return "🔴 `CN`"
         return f"🔴 `{iso}`"
-    if status in ("失败", "待确认"):
-        return f"🟡 `{iso}`"
+    if status == "未知":
+        return f"⚪ `{iso}`"
     return f"⚪ `{iso}`"
 
 
 def _google_cn_warning(data: dict) -> str:
     yt = data.get("Media", {}).get("YoutubePremium", {})
-    reg = _valid_iso(yt.get("Region", ""))
-    if yt.get("Status") in ("未解锁", "屏蔽") and reg == "CN":
-        return "\n🚨 **YouTube Premium 判定为中国大陆。**\n"
+    if yt.get("Status") == "送中":
+        return "\n🚨 **YouTube 判定为送中（google.cn）。**\n"
+    play = data.get("Media", {}).get("GooglePlay", {})
+    if play.get("Status") == "失败" and _valid_iso(play.get("Region", "")) == "CN":
+        return "\n🚨 **Google Play 判定为中国大陆。**\n"
     return ""
 
 
@@ -121,7 +125,7 @@ def _run_inner(cfg: dict) -> int:
     def _probe_log(level: str, msg: str) -> None:
         log(cfg, MODULE, level, msg)
 
-    log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（Clash Verge 解锁逻辑）")
+    log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（jiudu 解锁逻辑）")
     data = run_quality_probe(cfg, _probe_log)
 
     if not data or not data.get("Head", {}).get("IP"):
@@ -164,8 +168,8 @@ def _run_inner(cfg: dict) -> int:
     yt = data.get("Media", {}).get("YoutubePremium", {})
     raw_yt_reg = yt.get("Region", "")
     raw_yt_stat = yt.get("Status", "")
-    raw_nf = data.get("Media", {}).get("Netflix", {}).get("Status", "Unknown")
-    raw_gpt = data.get("Media", {}).get("ChatGPT_Web", {}).get("Status", "未知")
+    raw_play = data.get("Media", {}).get("GooglePlay", {}).get("Status", "Unknown")
+    raw_gemini = data.get("Media", {}).get("Gemini", {}).get("Status", "未知")
 
     warning = _google_cn_warning(data)
 
@@ -199,7 +203,7 @@ def _run_inner(cfg: dict) -> int:
 *🛡️ 风险评分 (越低越好)*
 {score_lines}{score_note}
 
-*🎬 核心业务解锁* _(ISO 3166-1 · Clash Verge)_
+*🎬 核心业务解锁* _(ISO 3166-1 · jiudu)_
 {unlock_lines}
 
 *✉️ 邮局与污染度*
@@ -212,7 +216,7 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
 
     safe_scam = re.sub(r"[^0-9]", "", str(scam)) or "0"
     node_name = cfg.get("NODE_NAME", "Unknown")
-    cb = build_svq_callback(node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_nf, raw_gpt)
+    cb = build_svq_callback(node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_play, raw_gemini)
 
     payload = {
         "text": report,
