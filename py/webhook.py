@@ -12,6 +12,7 @@ import http.server
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import socketserver
@@ -198,24 +199,25 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._service_unavailable(script)
 
-    def _ok(self, body: bytes) -> None:
-        self.send_response(200)
+    def _plain_response(self, status: int, body: bytes) -> None:
+        self.send_response(status)
         self.send_header("Content-type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
+        self.close_connection = True
+
+    def _ok(self, body: bytes) -> None:
+        self._plain_response(200, body)
 
     def _forbidden(self, body: bytes) -> None:
-        self.send_response(403)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(body)
+        self._plain_response(403, body)
 
     def _service_unavailable(self, script: str) -> None:
         self._webhook_log("ERROR", f"拒绝执行：未找到 {script}")
-        self.send_response(503)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(f"503 Service Unavailable: {script} missing\n".encode())
+        self._plain_response(503, f"503 Service Unavailable: {script} missing\n".encode())
 
     def _handle_log_async(self, cfg: dict[str, str]) -> None:
         """后台拉日志，避免阻塞 HTTPS 线程；不启动任何维护子进程."""
@@ -344,6 +346,136 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(f"500 Internal Error: {exc}\n".encode())
 
+    def _ota_repo_url(self, cfg: dict[str, str]) -> str:
+        repo_url = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
+        install = cfg.get("INSTALL_DIR", INSTALL_DIR)
+        install_sh = f"{install}/core/install.sh"
+        if os.path.isfile(install_sh):
+            with open(install_sh, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("REPO_RAW_URL="):
+                        repo_url = line.split("=", 1)[1].strip().strip('"\'')
+                        break
+        return repo_url.rstrip("/")
+
+    def _write_ota_runner(self, cfg: dict[str, str], repo_url: str) -> str:
+        install = cfg.get("INSTALL_DIR", INSTALL_DIR)
+        Path(install, "logs").mkdir(parents=True, exist_ok=True)
+
+        alias = cfg.get("NODE_ALIAS", "未知")
+        err_msg = (
+            f"❌ **OTA 失败**\n📍 节点: `{alias}`\n"
+            "⚠️ 原因: 脚本语法校验(bash -n)未通过，下载可能不完整。\n"
+            "🚀 状态: 升级已取消，节点安全。"
+        )
+        err_b64 = base64.b64encode(err_msg.encode()).decode()
+        runner = f"/tmp/ip_sentinel_agent_ota_{os.getpid()}_{int(time.time())}.sh"
+        script = f"""#!/bin/bash
+set -u
+INSTALL_DIR={shlex.quote(install)}
+REPO_RAW_URL={shlex.quote(repo_url)}
+TG_API_URL={shlex.quote(cfg.get("TG_API_URL", ""))}
+CHAT_ID={shlex.quote(cfg.get("CHAT_ID", ""))}
+ERR_B64={shlex.quote(err_b64)}
+LOG_DIR="$INSTALL_DIR/logs"
+mkdir -p "$LOG_DIR" /tmp
+LOG_FILE="$LOG_DIR/ota_upgrade.log"
+exec >> "$LOG_FILE" 2>&1
+echo "========== OTA started $(date -u '+%Y-%m-%d %H:%M:%S UTC') =========="
+export SILENT_OTA="true"
+export IP_SENTINEL_INSTALL_DIR="$INSTALL_DIR"
+export IP_SENTINEL_CONFIG="$INSTALL_DIR/config.conf"
+OTA_TMP="/tmp/ota_agent.$$.sh"
+cleanup() {{
+    rm -f "$OTA_TMP" "$0"
+}}
+trap cleanup EXIT
+
+if ! curl -fsSL --connect-timeout 10 --retry 3 "$REPO_RAW_URL/core/install.sh" -o "$OTA_TMP"; then
+    echo "OTA download failed: $REPO_RAW_URL/core/install.sh"
+    exit 1
+fi
+
+if [ ! -s "$OTA_TMP" ]; then
+    echo "OTA download failed: empty install script"
+    exit 1
+fi
+
+if bash -n "$OTA_TMP"; then
+    bash "$OTA_TMP"
+    rc=$?
+    echo "========== OTA finished rc=$rc $(date -u '+%Y-%m-%d %H:%M:%S UTC') =========="
+    exit "$rc"
+fi
+
+MSG=$(printf '%s' "$ERR_B64" | base64 -d 2>/dev/null || true)
+if [ -n "$TG_API_URL" ] && [ -n "$CHAT_ID" ] && [ -n "$MSG" ]; then
+    curl -s -m 10 -X POST "$TG_API_URL" \\
+        -d "chat_id=$CHAT_ID" \\
+        --data-urlencode "text=$MSG" \\
+        -d "parse_mode=Markdown" >/dev/null 2>&1 || true
+fi
+echo "OTA syntax check failed: downloaded install script is invalid"
+exit 1
+"""
+        Path(runner).write_text(script, encoding="utf-8")
+        os.chmod(runner, 0o700)
+        return runner
+
+    def _launch_ota_runner(self, runner: str, cfg: dict[str, str]) -> bool:
+        env = {
+            **os.environ,
+            "IP_SENTINEL_INSTALL_DIR": cfg.get("INSTALL_DIR", INSTALL_DIR),
+            "IP_SENTINEL_CONFIG": f"{cfg.get('INSTALL_DIR', INSTALL_DIR).rstrip('/')}/config.conf",
+        }
+        systemd_run = shutil.which("systemd-run")
+        if systemd_run and os.path.isdir("/run/systemd/system"):
+            unit = f"ip-sentinel-agent-ota-{os.getpid()}-{int(time.time())}"
+            try:
+                result = subprocess.run(
+                    [
+                        systemd_run,
+                        "--quiet",
+                        "--no-block",
+                        "--unit",
+                        unit,
+                        "bash",
+                        runner,
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                    env=env,
+                )
+                if result.returncode == 0:
+                    return True
+                self._webhook_log("WARN ", "systemd-run 提交 OTA 失败，回退为独立后台进程")
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                self._webhook_log("WARN ", f"systemd-run 不可用，回退为独立后台进程: {exc}")
+
+        try:
+            with open(os.devnull, "rb") as devnull_in, open(os.devnull, "ab") as devnull_out:
+                subprocess.Popen(
+                    ["bash", runner],
+                    stdin=devnull_in,
+                    stdout=devnull_out,
+                    stderr=devnull_out,
+                    cwd="/",
+                    start_new_session=True,
+                    close_fds=True,
+                    env=env,
+                )
+            return True
+        except OSError as exc:
+            self._webhook_log("ERROR", f"后台 OTA 进程启动失败: {exc}")
+            try:
+                Path(runner).unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+
     def _handle_ota(self) -> None:
         try:
             cfg = self._cfg()
@@ -355,51 +487,15 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 self._forbidden(b"403 Forbidden: OTA strictly disabled under Public Gateway mode\n")
                 return
 
+            runner = self._write_ota_runner(cfg, self._ota_repo_url(cfg))
+            if not self._launch_ota_runner(runner, cfg):
+                self._plain_response(500, b"500 Internal Error: OTA launcher failed\n")
+                return
             self._ok(b"Action Accepted: trigger_ota\n")
-
-            repo_url = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
-            install = cfg.get("INSTALL_DIR", INSTALL_DIR)
-            install_sh = f"{install}/core/install.sh"
-            if os.path.isfile(install_sh):
-                with open(install_sh, encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if line.startswith("REPO_RAW_URL="):
-                            repo_url = line.split("=", 1)[1].strip().strip('"\'')
-                            break
-
-            alias = cfg.get("NODE_ALIAS", "未知")
-            err_msg = (
-                f"❌ **OTA 失败**\n📍 节点: `{alias}`\n"
-                "⚠️ 原因: 脚本语法校验(bash -n)未通过，下载可能不完整。\n"
-                "🚀 状态: 升级已取消，节点安全。"
-            )
-            err_b64 = base64.b64encode(err_msg.encode()).decode()
-            tg_url = cfg.get("TG_API_URL", "")
-            chat_id = cfg.get("CHAT_ID", "")
-
-            ota_script = f"""
-export SILENT_OTA="true"
-curl -fsSL {repo_url}/core/install.sh -o /tmp/ota_agent.sh
-if bash -n /tmp/ota_agent.sh; then
-    bash /tmp/ota_agent.sh > {install}/logs/ota_upgrade.log 2>&1
-else
-    MSG=$(echo '{err_b64}' | base64 -d)
-    curl -s -m 10 -X POST "{tg_url}" -d "chat_id={chat_id}" -d "text=$MSG" -d "parse_mode=Markdown" > /dev/null 2>&1
-    echo "OTA Checksum Failed: Script corrupted" > {install}/logs/ota_upgrade.log
-fi
-"""
-            ota_b64 = base64.b64encode(ota_script.encode()).decode()
-            if shutil.which("systemd-run"):
-                cmd = f"systemd-run --quiet --no-block bash -c \"echo '{ota_b64}' | base64 -d | bash\""
-            else:
-                cmd = f"nohup bash -c \"echo '{ota_b64}' | base64 -d | bash\" >/dev/null 2>&1 &"
-            subprocess.Popen(cmd, shell=True, start_new_session=True)
             self._webhook_log("INFO ", "OTA 任务已提交后台执行")
         except Exception as exc:
             self._webhook_log("ERROR", f"OTA 触发失败: {exc}")
-            self.send_response(500)
-            self.end_headers()
-            self.wfile.write(f"500 Internal Error: {exc}\n".encode())
+            self._plain_response(500, f"500 Internal Error: {exc}\n".encode())
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
