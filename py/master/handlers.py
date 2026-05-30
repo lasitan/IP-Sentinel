@@ -369,6 +369,9 @@ class MasterHandlers:
         elif text.startswith("trend:"):
             self._cmd_trend_callback(chat_id, text.split(":", 1)[1], msg_id)
             handled = True
+        elif text.startswith("log_refresh:"):
+            self._cmd_log_refresh(chat_id, text.split(":", 1)[1], msg_id, auth)
+            handled = True
         elif any(text.startswith(p) for p in ("google:", "trust:", "run:", "report:", "log:", "quality:")):
             self._cmd_agent_action(chat_id, text, msg_id, auth)
             handled = True
@@ -810,6 +813,31 @@ class MasterHandlers:
                 self.tg.send_message(chat_id, result, markdown=False)
         else:
             self.tg.send_message(chat_id, result, markdown=False)
+
+    def _cmd_log_refresh(self, chat_id: str, node: str, msg_id: int | None, auth: str) -> None:
+        """在原日志消息上刷新内容，不新发互动消息."""
+        if not msg_id:
+            self.tg.send_message(chat_id, "⚠️ 无法刷新：缺少消息上下文。", markdown=False)
+            return
+        node = sanitize_node_name(node)
+        info = self._agent_row(chat_id, node)
+        if not info:
+            self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
+            return
+        ip, port = info
+        url = generate_signed_url(auth, ip, port, "/trigger_log") + f"&msg_id={msg_id}"
+        resp = call_agent(url)
+        if resp == "FAILED":
+            self.tg.send_message(
+                chat_id,
+                "❌ 日志刷新失败：节点无响应或链路异常。",
+                markdown=False,
+            )
+        elif "503" in resp or "missing" in resp.lower():
+            self.tg.send_message(
+                chat_id,
+                f"❌ 节点 `{node}` 缺少 webhook 模块，请 OTA 升级。",
+            )
 
     def _cmd_agent_action(self, chat_id: str, text: str, msg_id: int | None, auth: str) -> None:
         action = text.split(":", 1)[0]

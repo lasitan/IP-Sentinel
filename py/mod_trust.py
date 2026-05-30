@@ -15,7 +15,8 @@ from config import require_config
 from log_util import log_trust
 from network import build_curl_context, http_status
 from persona import load_lines, pick_session_ua
-from task_lock import acquire_maintenance_lock, maintenance_busy, release_maintenance_lock
+from session_stats import record_trust_session
+from task_lock import acquire_trust_lock, release_trust_lock, trust_busy
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 FALLBACK_URLS = [
@@ -79,15 +80,15 @@ def load_trust_urls(cfg: dict) -> list[str]:
 
 def run(cfg: dict | None = None) -> int:
     cfg = cfg or require_config()
-    if not acquire_maintenance_lock():
-        _, holder = maintenance_busy()
-        log_trust(cfg, "WARN ", f"已有维护任务运行中 (pid={holder})，跳过本次信用净化。")
+    if not acquire_trust_lock():
+        _, holder = trust_busy()
+        log_trust(cfg, "WARN ", f"信用净化进行中 (pid={holder})，跳过本次任务。")
         return 0
 
     try:
         return _run_locked(cfg)
     finally:
-        release_maintenance_lock()
+        release_trust_lock()
 
 
 def _run_locked(cfg: dict) -> int:
@@ -107,7 +108,7 @@ def _run_locked(cfg: dict) -> int:
     _log("INFO ", f"已锁定本地伪装指纹: {' '.join(current_ua.split()[:2])}...")
 
     ctx = build_curl_context(cfg, _log)
-    step_count = random.randint(3, 6)
+    step_count = random.randint(2, 4)
     success = 0
 
     for i in range(1, step_count + 1):
@@ -127,14 +128,23 @@ def _run_locked(cfg: dict) -> int:
             _log("EXEC ", f"动作[{i}/{step_count}]异常 | 状态: {code} | 阻拦: {target}")
 
         if i < step_count:
-            sleep_time = random.randint(45, 120)
+            sleep_time = random.randint(15, 35)
             _log("WAIT ", f"正在浏览本地高权重页面，模拟停留 {sleep_time} 秒...")
             time.sleep(sleep_time)
 
     if success >= step_count // 2:
-        _log("SCORE", f"自检结论: ✅ 信用净化完成 (已成功注入 {success} 条无害流量)")
+        conclusion = f"✅ 信用净化完成 (已成功注入 {success} 条无害流量)"
+        _log("SCORE", f"自检结论: {conclusion}")
     else:
-        _log("SCORE", "自检结论: ❌ 净化受阻 (部分站点拦截或网络超时)")
+        conclusion = "❌ 净化受阻 (部分站点拦截或网络超时)"
+        _log("SCORE", f"自检结论: {conclusion}")
+
+    record_trust_session(
+        cfg,
+        conclusion=conclusion,
+        success_steps=success,
+        total_steps=step_count,
+    )
 
     _log("END  ", "========== 会话结束，释放进程 ==========")
     _log("INFO ", "系统级调度完毕，信任因子持续积累中...")

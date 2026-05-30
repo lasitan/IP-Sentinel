@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from config import require_config
 from ip_quality_probe import run_quality_probe
 from log_util import log
-from task_lock import acquire_maintenance_lock, maintenance_busy, release_maintenance_lock
+from session_stats import record_quality_session
 from tg_util import build_svq_callback, escape_markdown, tg_post
 
 MODULE = "Quality"
@@ -232,6 +232,15 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
     }
     if _tg_post(cfg, payload):
         log(cfg, MODULE, "SCORE", f"检测完成 IP={ip_addr}")
+        record_quality_session(
+            cfg,
+            ip=ip_addr,
+            scam_score=str(scam),
+            youtube_region=raw_yt_reg,
+            youtube_status=raw_yt_stat,
+            play_status=raw_play,
+            gemini_status=raw_gemini,
+        )
     else:
         log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")
     log(cfg, MODULE, "END  ", "========== IP 质量检测结束 ==========")
@@ -243,10 +252,6 @@ def run() -> int:
         cfg = require_config()
     except SystemExit:
         return 1
-    if not acquire_maintenance_lock():
-        _, holder = maintenance_busy()
-        log(cfg, MODULE, "WARN ", f"已有维护任务运行中 (pid={holder})，跳过本次质量检测。")
-        return 0
     try:
         return _run_inner(cfg)
     except Exception as exc:
@@ -270,8 +275,6 @@ def run() -> int:
         )
         log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (异常) ==========")
         return 1
-    finally:
-        release_maintenance_lock()
 
 
 def main() -> None:

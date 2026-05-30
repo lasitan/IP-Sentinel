@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram 日报：过去 24 小时日志统计、节点状态、版本检查."""
+"""Telegram 日报：读取 session_stats 结构化统计（不再解析日志）."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import load_config
-from log_util import load_log_lines_within_hours, log
+from log_util import log
+from network import build_curl_context
+from session_stats import latest_snapshot, load_sessions, summarize_google, summarize_trust
 
 MODULE = "Report"
-from network import build_curl_context
-
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 
 FLAGS = {
@@ -37,41 +37,6 @@ FLAGS = {
     "UA": "🇺🇦", "MO": "🇲🇴", "KH": "🇰🇭", "MM": "🇲🇲", "LA": "🇱🇦",
     "MN": "🇲🇳", "NP": "🇳🇵", "BD": "🇧🇩",
 }
-
-
-_MAPS_GEO_DONE_RE = re.compile(r"\[MAPS_GEO\].*访问完成")
-_EARTH_GEO_DONE_RE = re.compile(r"\[EARTH_GEO\].*访问完成")
-_MAPS_GEO_SESSION_RE = re.compile(r"本次会话 Maps 虚拟定位访问:\s*(\d+)\s*次")
-_EARTH_GEO_SESSION_RE = re.compile(r"本次会话 Earth 虚拟定位访问:\s*(\d+)\s*次")
-
-
-def _count_tagged_geo_visits(
-    google_lines: list[str],
-    *,
-    done_re: re.Pattern[str],
-    session_re: re.Pattern[str],
-) -> int:
-    per_visit = sum(1 for ln in google_lines if done_re.search(ln))
-    if per_visit:
-        return per_visit
-    session_total = 0
-    for ln in google_lines:
-        m = session_re.search(ln)
-        if m:
-            session_total += int(m.group(1))
-    return session_total
-
-
-def _count_maps_geo_visits(google_lines: list[str]) -> int:
-    return _count_tagged_geo_visits(
-        google_lines, done_re=_MAPS_GEO_DONE_RE, session_re=_MAPS_GEO_SESSION_RE
-    )
-
-
-def _count_earth_geo_visits(google_lines: list[str]) -> int:
-    return _count_tagged_geo_visits(
-        google_lines, done_re=_EARTH_GEO_DONE_RE, session_re=_EARTH_GEO_SESSION_RE
-    )
 
 
 def _node_name(cfg: dict) -> str:
@@ -190,15 +155,7 @@ def run() -> int:
         try:
             last = int(lock_file.read_text().strip())
             if now - last < 60:
-                log_path = cfg.get("LOG_FILE", "")
-                if log_path:
-                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                    ver = cfg.get("AGENT_VERSION", "未知")
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"[{ts}] [v{ver}] [WARN ] [Report ] [SYSTEM] "
-                            "⚠️ 报告请求过于频繁，请 60 秒后再试。\n"
-                        )
+                log(cfg, MODULE, "WARN ", "报告请求过于频繁，请 60 秒后再试。")
                 return 0
         except ValueError:
             pass
@@ -214,33 +171,18 @@ def run() -> int:
     flag = FLAGS.get(base_cc, "🌐")
     region_name = cfg.get("REGION_NAME", base_cc)
 
-    log_path = Path(cfg.get("LOG_FILE", f"{install}/logs/sentinel.log"))
-    day_lines = load_log_lines_within_hours(log_path, hours=24.0)
+    sessions = load_sessions(cfg, hours=24.0)
+    snap = latest_snapshot(sessions)
 
-    if not day_lines:
+    if not sessions:
         msg = (
             "🛑 **[IP-Sentinel] 告警：节点异常**\n"
             "----------------------------\n"
             f"📍 **节点名称**: `{node_alias}`\n"
-            "⚠️ **警告**: 过去 24 小时无运行日志！\n"
-            "🛠️ **建议**: 节点可能刚安装，请在面板手动执行一次维护任务。"
+            "⚠️ **警告**: 过去 24 小时无会话统计记录！\n"
+            "🛠️ **建议**: 节点可能刚安装或尚未完成纠偏/净化，请手动执行一次维护。"
         )
     else:
-        score_lines = [ln for ln in day_lines if "[SCORE]" in ln]
-        last_line = score_lines[-1] if score_lines else ""
-        last_time = ""
-        last_mod = "System"
-        last_score = "暂无数据"
-        if last_line:
-            parts = last_line.split()
-            if len(parts) >= 2:
-                last_time = parts[0].strip("[]") + " " + parts[1].strip("[]")
-            m_mod = re.search(r"\[([^\]]+)\].*\[SCORE\]", last_line)
-            if m_mod:
-                last_mod = m_mod.group(1).strip()
-            if "自检结论: " in last_line:
-                last_score = last_line.split("自检结论: ", 1)[1]
-
         msg = (
             f"📊 **IP-Sentinel 每日简报 ({flag} {region_name})**\n"
             "----------------------------\n"
@@ -250,37 +192,26 @@ def run() -> int:
         )
 
         if cfg.get("ENABLE_GOOGLE", "false").lower() == "true":
-            g_logs = [ln for ln in day_lines if "[Google" in ln]
-            g_total = sum(1 for ln in g_logs if "[START]" in ln)
-            g_ok = sum(1 for ln in g_logs if "✅" in ln)
-            g_fail = sum(1 for ln in g_logs if "❌" in ln)
-            g_warn = sum(1 for ln in g_logs if "⚠️" in ln)
-            g_maps_geo = _count_maps_geo_visits(g_logs)
-            g_earth_geo = _count_earth_geo_visits(g_logs)
-            rate = f"{(g_ok / g_total * 100):.1f}" if g_total else "0.0"
+            g = summarize_google(sessions)
             msg += (
                 f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
-                f"🚀 执行总数: {g_total} 次 (胜率: **{rate}%**)\n"
-                f"✅ 成功: {g_ok} | ❌ CN 判定: {g_fail} | ⚠️ 警告: {g_warn}\n"
-                f"📍 虚拟定位 Maps: **{g_maps_geo}** 次 | Earth: **{g_earth_geo}** 次"
+                f"🚀 执行总数: {g['total']} 次 (胜率: **{g['rate']}%**)\n"
+                f"✅ 成功: {g['ok']} | ❌ CN 判定: {g['fail']} | ⚠️ 警告: {g['warn']}\n"
+                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":
-            t_logs = [ln for ln in day_lines if "[Trust" in ln]
-            t_total = sum(1 for ln in t_logs if "[START]" in ln)
-            t_ok = sum(1 for ln in t_logs if "✅" in ln)
-            t_fail = sum(1 for ln in t_logs if "❌" in ln)
-            rate = f"{(t_ok / t_total * 100):.1f}" if t_total else "0.0"
+            t = summarize_trust(sessions)
             msg += (
                 f"\n\n🔰 **[IP 信用净化]** (过去 24 小时)\n"
-                f"🚀 净化总数: {t_total} 轮 (成功率: **{rate}%**)\n"
-                f"✅ 成功注入: {t_ok} | ❌ 访问受阻: {t_fail}"
+                f"🚀 净化总数: {t['total']} 轮 (成功率: **{t['rate']}%**)\n"
+                f"✅ 成功注入: {t['ok']} | ❌ 访问受阻: {t['fail']}"
             )
 
         msg += (
-            f"\n\n🕒 **最近执行快照 (过去 24 小时):  `{last_mod}`**\n"
-            f"时间: {last_time or '暂无数据'} (UTC)\n"
-            f"结论: {last_score}"
+            f"\n\n🕒 **最近执行快照 (过去 24 小时): `{snap['module']}`**\n"
+            f"时间: {snap['ts'] or '暂无数据'} (UTC)\n"
+            f"结论: {snap['conclusion']}"
         )
 
     local_ver = cfg.get("AGENT_VERSION", "未知")

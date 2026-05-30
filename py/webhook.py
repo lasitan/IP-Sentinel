@@ -29,7 +29,8 @@ from agent_spawn import spawn_py_script
 from config import DEFAULT_INSTALL_DIR
 from log_util import log as agent_log
 from log_util import tail_log_file
-from task_lock import maintenance_busy
+from task_lock import browser_busy
+from tg_util import tg_method_url, tg_post
 
 PY_DIR = Path(__file__).resolve().parent
 INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
@@ -149,11 +150,15 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if req_path == "/trigger_log":
-            busy, holder = maintenance_busy()
-            if busy:
+            busy, holder = browser_busy()
+            msg_raw = query.get("msg_id", [""])[0]
+            edit_msg_id = int(msg_raw) if str(msg_raw).isdigit() else None
+            if edit_msg_id:
+                self._webhook_log("INFO ", f"收到 Master 指令: 刷新日志 (msg_id={edit_msg_id})")
+            elif busy:
                 self._webhook_log(
                     "INFO ",
-                    f"收到拉取日志请求；维护任务进行中 (pid={holder})，仅读取日志不启动新任务。",
+                    f"收到拉取日志；Google 纠偏进行中 (pid={holder})，仅读取日志。",
                 )
             else:
                 self._webhook_log("INFO ", "收到 Master 指令: 拉取日志 (/trigger_log)")
@@ -161,7 +166,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             cfg_snapshot = self._cfg()
             threading.Thread(
                 target=self._handle_log_async,
-                args=(cfg_snapshot,),
+                args=(cfg_snapshot, edit_msg_id),
                 daemon=True,
             ).start()
             return
@@ -219,7 +224,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self._webhook_log("ERROR", f"拒绝执行：未找到 {script}")
         self._plain_response(503, f"503 Service Unavailable: {script} missing\n".encode())
 
-    def _handle_log_async(self, cfg: dict[str, str]) -> None:
+    def _handle_log_async(self, cfg: dict[str, str], edit_msg_id: int | None = None) -> None:
         """后台拉日志，避免阻塞 HTTPS 线程；不启动任何维护子进程."""
         try:
             install = cfg.get("INSTALL_DIR", INSTALL_DIR)
@@ -231,35 +236,32 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             alias = cfg.get("NODE_ALIAS", cfg.get("NODE_NAME", "Unknown-Node"))
             text = f"📄 <b>[{alias}] 实时日志 (v{ver}):</b>\n<pre><code>{log_data}</code></pre>"
             node_cb = cfg.get("NODE_NAME", "Unknown")
-            payload = {
+            keyboard = [
+                [{"text": "🔄 刷新日志", "callback_data": f"log_refresh:{node_cb}"}],
+                [{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node_cb}"}],
+            ]
+            payload: dict[str, object] = {
                 "chat_id": cfg.get("CHAT_ID", ""),
                 "text": text,
                 "parse_mode": "HTML",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node_cb}"}]
-                    ]
-                },
+                "reply_markup": {"inline_keyboard": keyboard},
             }
-            api_url = cfg.get("TG_API_URL", "")
-            if not api_url or not cfg.get("CHAT_ID"):
+            api_base = cfg.get("TG_API_URL", "")
+            if not api_base or not cfg.get("CHAT_ID"):
                 agent_log(cfg, "Webhook", "ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
                 return
-            data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                api_url,
-                data=data,
-                headers={
-                    "User-Agent": f"IP-Sentinel-Agent/{ver}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                body = resp.read().decode(errors="ignore")
-                if '"ok":true' in body:
-                    agent_log(cfg, "Webhook", "INFO ", "实时日志已推送至 Telegram")
-                else:
-                    agent_log(cfg, "Webhook", "WARN ", f"Telegram 返回异常: {body[:200]}")
+            if edit_msg_id:
+                payload["message_id"] = edit_msg_id
+                api_url = tg_method_url(api_base, "editMessageText")
+                action = "更新"
+            else:
+                api_url = api_base
+                action = "推送"
+            ok, err = tg_post(api_url, payload, timeout=15)
+            if ok:
+                agent_log(cfg, "Webhook", "INFO ", f"实时日志已{action}至 Telegram")
+            else:
+                agent_log(cfg, "Webhook", "WARN ", f"Telegram {action}失败: {err}")
         except Exception as exc:
             agent_log(cfg, "Webhook", "ERROR", f"拉取日志推送失败: {exc}")
 

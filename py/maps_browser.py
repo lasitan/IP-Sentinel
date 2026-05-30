@@ -462,7 +462,7 @@ def _earth_page_has_ui(page: Page) -> str | None:
     return None
 
 
-def _earth_wait_ui_ready(page: Page, _log: LogFn, *, max_sec: float = 45.0) -> bool:
+def _earth_wait_ui_ready(page: Page, _log: LogFn, *, max_sec: float = 28.0) -> bool:
     """轮询 earth-app / canvas；遇不支持页则尝试启动 Wasm。"""
     deadline = time.monotonic() + max_sec
     wasm_tried = False
@@ -598,7 +598,7 @@ def _visit_with_geolocation(
     tag: str,
     on_loaded: OnPageLoadedFn | None = None,
 ) -> str:
-    dwell = dwell_sec if dwell_sec is not None else random.randint(45, 75)
+    dwell = dwell_sec if dwell_sec is not None else random.randint(12, 22)
 
     def _log(level: str, msg: str) -> None:
         if log:

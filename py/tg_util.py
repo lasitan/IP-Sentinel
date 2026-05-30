@@ -57,6 +57,15 @@ def build_svq_callback(
     return enc[:max_bytes].decode("utf-8", errors="ignore")
 
 
+def tg_method_url(api_url: str, method: str) -> str:
+    """由 sendMessage 配置 URL 推导 editMessageText 等 API 地址."""
+    if not api_url:
+        return ""
+    if api_url.endswith("/sendMessage"):
+        return api_url[: -len("sendMessage")] + method
+    return f"{api_url.rstrip('/')}/{method}"
+
+
 def tg_post(api_url: str, payload: dict[str, object], *, timeout: int = 30) -> tuple[bool, str]:
     """
     发送 Telegram JSON。Markdown 解析失败时去掉 parse_mode 重试一次。
@@ -76,6 +85,8 @@ def tg_post(api_url: str, payload: dict[str, object], *, timeout: int = 30) -> t
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return False, str(exc)
         if '"ok":true' in raw:
+            return True, ""
+        if "message is not modified" in raw.lower():
             return True, ""
         return False, raw[:240]
 
