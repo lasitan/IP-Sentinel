@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from master.agent_client import call_agent
+from master.config import save_master_config_keys
 from master.db import MasterDB
 from master.flags import get_flag
 from master.security import (
@@ -513,6 +513,10 @@ class MasterHandlers:
         rewritten = self.handle_rename_reply(text, reply_to_text)
         if rewritten:
             text = rewritten
+        else:
+            forum_bind = self.handle_forum_bind_reply(text, reply_to_text)
+            if forum_bind:
+                text = forum_bind
 
         # 先应答 callback，消除客户端 loading；避免未传 text 导致 TypeError
         if cb_id:
@@ -589,6 +593,12 @@ class MasterHandlers:
         elif text == "forum_topics_rebuild":
             self._cmd_forum_topics_rebuild(chat_id, msg_id, auth)
             handled = True
+        elif text == "forum_bind_prompt":
+            self._cmd_forum_bind_prompt(chat_id)
+            handled = True
+        elif text.startswith("forum_bind:"):
+            self._cmd_forum_bind(chat_id, text.split(":", 1)[1], auth)
+            handled = True
         elif any(text.startswith(p) for p in ("google:", "trust:", "run:", "report:", "log:", "quality:")):
             self._cmd_agent_action(chat_id, text, msg_id, auth)
             handled = True
@@ -627,8 +637,12 @@ class MasterHandlers:
                    AND (message_thread_id IS NULL OR message_thread_id = 0)""",
                 (chat_id,),
             ) or 0
-            label = f"📌 补建节点话题 ({missing})" if missing else "📌 同步节点话题绑定"
-            kb.append([{"text": label, "callback_data": "forum_topics_rebuild"}])
+            topic_label = (
+                f"📌 补建节点话题 ({missing})" if missing else "📌 同步节点话题绑定"
+            )
+        else:
+            topic_label = "📌 开启节点话题模式"
+        kb.append([{"text": topic_label, "callback_data": "forum_topics_rebuild"}])
         kb.append(
             [{"text": "🌟 前往 GitHub 点亮星标", "url": "https://github.com/lasitan/IP-Sentinel"}],
         )
@@ -1052,10 +1066,64 @@ class MasterHandlers:
             result = "✅ OTA 已触发，节点正在后台升级…"
         self._msg_node(chat_id, node, result, markdown=False if "❌" in result else True)
 
+    def handle_forum_bind_reply(self, text: str, reply_text: str) -> str | None:
+        if "请回复本消息以绑定话题群组" not in reply_text:
+            return None
+        gid = sanitize_chat_id(text.strip())
+        if not gid.startswith("-"):
+            return None
+        return f"forum_bind:{gid}"
+
+    def _apply_forum_config(self, forum_chat_id: str) -> None:
+        save_master_config_keys(
+            {"FORUM_MODE": "true", "FORUM_CHAT_ID": forum_chat_id},
+        )
+        self.cfg["FORUM_MODE"] = "true"
+        self.cfg["FORUM_CHAT_ID"] = forum_chat_id
+
+    def _cmd_forum_bind_prompt(self, chat_id: str) -> None:
+        self.tg.force_reply_prompt(
+            chat_id,
+            "📝 **请回复本消息以绑定话题群组**\n"
+            "粘贴超级群组的 Chat ID（通常以 `-100` 开头）。\n"
+            "可通过 @RawDataBot 或 @getidsbot 获取。",
+        )
+
+    def _cmd_forum_bind(self, chat_id: str, raw_id: str, auth: str) -> None:
+        forum_id = sanitize_chat_id(raw_id)
+        if not forum_id.startswith("-"):
+            self.tg.send_message(
+                chat_id,
+                "❌ Chat ID 格式无效，请以 `-100` 开头的群组 ID 重试。",
+            )
+            return
+        self._apply_forum_config(forum_id)
+        self.tg.send_message(
+            chat_id,
+            f"✅ 话题模式已开启，绑定群组 `{forum_id}`。\n"
+            "正在为现有节点补建话题…",
+        )
+        self._cmd_forum_topics_rebuild(chat_id, None, auth)
+
     def _cmd_forum_topics_rebuild(self, chat_id: str, msg_id: int | None, auth: str) -> None:
         """为缺少话题的节点批量补建 Forum Topic，并同步已有节点的 Agent 绑定."""
         if not self.forum_mode:
-            self.tg.send_message(chat_id, "⚠️ 未开启话题模式。", markdown=False)
+            kb = [
+                [{"text": "📝 绑定群组 Chat ID", "callback_data": "forum_bind_prompt"}],
+                [{"text": "🏠 返回主菜单", "callback_data": "/start"}],
+            ]
+            body = (
+                "📌 **节点话题模式**\n\n"
+                "每个节点在超级群组中拥有独立话题，日志/报告/控制台均在话题内维护。\n\n"
+                "**前置条件：**\n"
+                "1. 创建超级群组并开启 **Topics**\n"
+                "2. 将 Bot 设为管理员（含「管理话题」权限）\n"
+                "3. 获取群组 Chat ID 并点击下方按钮绑定"
+            )
+            if msg_id:
+                self.tg.edit_ui(chat_id, msg_id, body, kb)
+            else:
+                self.tg.send_ui(chat_id, body, kb)
             return
         rows = self.db.execute(
             """SELECT node_name, COALESCE(node_alias, node_name) AS alias, region,

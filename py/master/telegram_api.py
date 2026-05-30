@@ -187,6 +187,22 @@ class TelegramAPI:
         self._with_thread(payload, message_thread_id)
         self._post("sendMessage", payload)
 
+    def force_reply_prompt(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        message_thread_id: int | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "reply_markup": {"force_reply": True},
+        }
+        self._with_thread(payload, message_thread_id)
+        self._post("sendMessage", payload)
+
     def get_updates(self, offset: int, timeout: int = 30) -> list[dict[str, Any]]:
         url = f"{self.base}/getUpdates?offset={offset}&timeout={timeout}"
         req = urllib.request.Request(url, method="GET")
