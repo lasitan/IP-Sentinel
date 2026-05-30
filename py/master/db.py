@@ -55,6 +55,8 @@ class MasterDB:
                 ("enable_trust", "ALTER TABLE nodes ADD COLUMN enable_trust TEXT DEFAULT 'true'"),
                 ("enable_ota", "ALTER TABLE nodes ADD COLUMN enable_ota TEXT DEFAULT 'false'"),
                 ("message_thread_id", "ALTER TABLE nodes ADD COLUMN message_thread_id INTEGER"),
+                ("topic_ui_message_id", "ALTER TABLE nodes ADD COLUMN topic_ui_message_id INTEGER"),
+                ("topic_ui_edit_count", "ALTER TABLE nodes ADD COLUMN topic_ui_edit_count INTEGER DEFAULT 0"),
                 ("goog_status", "ALTER TABLE ip_trend_log ADD COLUMN goog_status TEXT DEFAULT 'Unknown'"),
                 ("gpt_status", "ALTER TABLE ip_trend_log ADD COLUMN gpt_status TEXT DEFAULT 'Unknown'"),
             ):

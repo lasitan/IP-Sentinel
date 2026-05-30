@@ -34,6 +34,7 @@ from master.security import (
 from master.telegram_api import TelegramAPI
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
+TOPIC_UI_MAX_EDITS = 200
 
 
 @dataclass
@@ -61,6 +62,104 @@ class MasterHandlers:
         self.official = cfg.get("IS_OFFICIAL_GATEWAY", "false").lower() == "true"
         self.master_ota = cfg.get("ENABLE_MASTER_OTA", "false").lower() == "true"
         self._ctx = _TgCtx("", "", None, None, False, "")
+        self._bot_username = (tg.get_me_username() or "").lower()
+        self._pending_rename: dict[int, str] = {}
+
+    def _normalize_cmd(self, text: str) -> str:
+        """解析 /start@BotName 等群组内 @ 指令."""
+        t = text.strip()
+        if not t.startswith("/"):
+            return t
+        parts = t.split(maxsplit=1)
+        head = parts[0]
+        if "@" not in head:
+            return t
+        cmd, mention = head.split("@", 1)
+        if self._bot_username and mention.lower() != self._bot_username:
+            return t
+        tail = parts[1] if len(parts) > 1 else ""
+        return f"{cmd} {tail}".strip() if tail else cmd
+
+    def _node_for_thread(self, thread_id: int | None) -> str | None:
+        if not thread_id:
+            return None
+        row = self.db.execute(
+            "SELECT node_name FROM nodes WHERE message_thread_id=? LIMIT 1",
+            (thread_id,),
+        )
+        return row[0]["node_name"] if row else None
+
+    def _get_topic_ui(self, owner: str, node: str) -> tuple[int | None, int]:
+        row = self.db.execute(
+            """SELECT topic_ui_message_id, COALESCE(topic_ui_edit_count, 0) AS c
+               FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1""",
+            (owner, node),
+        )
+        if not row:
+            return None, 0
+        mid = row[0]["topic_ui_message_id"]
+        return (int(mid) if mid else None, int(row[0]["c"]))
+
+    def _set_topic_ui(self, owner: str, node: str, msg_id: int | None, edit_count: int = 0) -> None:
+        self.db.execute(
+            """UPDATE nodes SET topic_ui_message_id=?, topic_ui_edit_count=?
+               WHERE chat_id=? AND node_name=?""",
+            (msg_id, edit_count, owner, node),
+        )
+
+    def _append_back_btn(self, keyboard: list, node: str, *, on_manage: bool = False) -> list:
+        kb = [row[:] for row in keyboard]
+        cb = f"manage:{node}"
+        if any(btn.get("callback_data") == cb for row in kb for btn in row):
+            return kb
+        label = "🔄 刷新控制台" if on_manage else "⬅️ 返回控制台"
+        kb.append([{"text": label, "callback_data": cb}])
+        return kb
+
+    def _topic_present(
+        self,
+        owner: str,
+        node: str,
+        text: str,
+        keyboard: list,
+        *,
+        on_manage: bool = False,
+    ) -> None:
+        """话题内唯一 Master 消息：优先编辑，达上限或失败则删旧新发."""
+        thread = self._node_thread_id(owner, node)
+        if not thread or not self.forum_chat_id:
+            return
+        dest = self.forum_chat_id
+        kb = self._append_back_btn(keyboard, node, on_manage=on_manage)
+        ui_id, edits = self._get_topic_ui(owner, node)
+
+        def _fresh_send() -> None:
+            nonlocal ui_id
+            if ui_id:
+                self.tg.delete_message(dest, ui_id, message_thread_id=thread)
+            new_id = self.tg.send_ui(dest, text, kb, message_thread_id=thread)
+            if new_id:
+                ui_id = new_id
+                self._set_topic_ui(owner, node, new_id, 0)
+
+        if not ui_id or edits >= TOPIC_UI_MAX_EDITS:
+            _fresh_send()
+            return
+
+        if self.tg.edit_ui(dest, ui_id, text, kb, message_thread_id=thread):
+            self._set_topic_ui(owner, node, ui_id, edits + 1)
+        else:
+            _fresh_send()
+
+    def _delete_user_msg(self, user_msg_id: int | None) -> None:
+        if not user_msg_id or not self._ctx.in_forum:
+            return
+        self.tg.delete_message(
+            self._ctx.chat, user_msg_id, message_thread_id=self._ctx.thread
+        )
+
+    def _in_topic_flow(self, owner: str, node: str) -> bool:
+        return bool(self.forum_mode and self._node_thread_id(owner, node))
 
     @property
     def forum_mode(self) -> bool:
@@ -132,6 +231,33 @@ class MasterHandlers:
             return False
         return True
 
+    def _ui_node(
+        self,
+        owner_chat_id: str,
+        node: str,
+        text: str,
+        keyboard: list,
+        *,
+        on_manage: bool = False,
+    ) -> None:
+        if self._in_topic_flow(owner_chat_id, node):
+            self._topic_present(owner_chat_id, node, text, keyboard, on_manage=on_manage)
+            return
+        dest, thread = self._node_tg_dest(owner_chat_id, node)
+        if self._can_edit_in_place(dest, thread):
+            self.tg.edit_ui(dest, self._ctx.msg_id, text, keyboard, message_thread_id=thread)
+            return
+        self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
+        if dest != owner_chat_id and not self._ctx.in_forum:
+            alias = self.db.scalar(
+                "SELECT COALESCE(node_alias, node_name) FROM nodes WHERE chat_id=? AND node_name=?",
+                (owner_chat_id, node),
+            ) or node
+            self.tg.send_message(
+                owner_chat_id,
+                f"⚙️ 节点 `{alias}` 控制台已在群组话题中打开，请前往对应话题操作。",
+            )
+
     def _msg_node(
         self,
         owner_chat_id: str,
@@ -140,6 +266,10 @@ class MasterHandlers:
         *,
         markdown: bool = True,
     ) -> None:
+        if self._in_topic_flow(owner_chat_id, node):
+            kb = [[{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node}"}]]
+            self._topic_present(owner_chat_id, node, text, kb)
+            return
         dest, thread = self._node_tg_dest(owner_chat_id, node)
         if self._can_edit_in_place(dest, thread):
             if not self.tg.edit_message(
@@ -157,28 +287,6 @@ class MasterHandlers:
                     owner_chat_id,
                     f"💬 节点 `{alias}` 的操作反馈已发送至群组话题。",
                 )
-
-    def _ui_node(
-        self,
-        owner_chat_id: str,
-        node: str,
-        text: str,
-        keyboard: list,
-    ) -> None:
-        dest, thread = self._node_tg_dest(owner_chat_id, node)
-        if self._can_edit_in_place(dest, thread):
-            self.tg.edit_ui(dest, self._ctx.msg_id, text, keyboard, message_thread_id=thread)
-            return
-        self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
-        if dest != owner_chat_id and not self._ctx.in_forum:
-            alias = self.db.scalar(
-                "SELECT COALESCE(node_alias, node_name) FROM nodes WHERE chat_id=? AND node_name=?",
-                (owner_chat_id, node),
-            ) or node
-            self.tg.send_message(
-                owner_chat_id,
-                f"⚙️ 节点 `{alias}` 控制台已在群组话题中打开，请前往对应话题操作。",
-            )
 
     def _push_topic_to_agent(self, owner_chat_id: str, node: str, auth: str) -> None:
         info = self._agent_row(owner_chat_id, node)
@@ -228,11 +336,9 @@ class MasterHandlers:
             )
         self._push_topic_to_agent(owner_chat_id, node, auth)
         if send_console:
-            panel, kb = self._manage_keyboard(owner_chat_id, node)
+            panel, kb = self._manage_keyboard(owner_chat_id, node, for_topic=True)
             if kb:
-                self.tg.send_ui(
-                    self.forum_chat_id, panel, kb, message_thread_id=thread_id
-                )
+                self._topic_present(owner_chat_id, node, panel, kb, on_manage=True)
         return thread_id
 
     def _auth_key(self, chat_id: str) -> str:
@@ -255,7 +361,9 @@ class MasterHandlers:
             kb.append([{"text": "🏠 返回主菜单", "callback_data": "/start"}])
         return kb
 
-    def _manage_keyboard(self, chat_id: str, node: str) -> tuple[str, list]:
+    def _manage_keyboard(
+        self, chat_id: str, node: str, *, for_topic: bool = False
+    ) -> tuple[str, list]:
         row = self.db.execute(
             """SELECT enable_google, enable_trust, enable_ota, agent_ip,
                       COALESCE(last_seen, '未知') AS last_seen,
@@ -301,12 +409,16 @@ class MasterHandlers:
             ]
         else:
             config = [[{"text": "✏️ 更改终端展示代号", "callback_data": f"rename:{node}"}]]
-        danger = [
-            [
-                {"text": "🗑️ 删除节点", "callback_data": f"del:{node}"},
-                {"text": "⬅️ 返回区域列表", "callback_data": "list_nodes"},
-            ],
-        ]
+        danger = (
+            [[{"text": "🗑️ 删除节点", "callback_data": f"del:{node}"}]]
+            if for_topic
+            else [
+                [
+                    {"text": "🗑️ 删除节点", "callback_data": f"del:{node}"},
+                    {"text": "⬅️ 返回区域列表", "callback_data": "list_nodes"},
+                ],
+            ]
+        )
         alias = r["alias"] or node
         text = (
             f"⚙️ **节点**: `{alias}`\n"
@@ -491,11 +603,13 @@ class MasterHandlers:
         cb_id: str | None = None,
         msg_id: int | None = None,
         thread_id: int | None = None,
+        user_msg_id: int | None = None,
         reply_to_text: str = "",
     ) -> None:
         incoming_chat = sanitize_chat_id(chat_id)
         if not incoming_chat:
             return
+        text = self._normalize_cmd(text)
         owner_chat_id = self._resolve_owner(incoming_chat, thread_id, text)
         self._ctx = _TgCtx(
             owner=owner_chat_id,
@@ -506,6 +620,7 @@ class MasterHandlers:
             forum_chat_id=self.forum_chat_id,
         )
         chat_id = owner_chat_id
+        user_msg_deleted = False
 
         if text.startswith("svq|"):
             if self.handle_svq(chat_id, text, cb_id, msg_id):
@@ -519,6 +634,27 @@ class MasterHandlers:
             if forum_bind:
                 text = forum_bind
 
+        if (
+            not cb_id
+            and self._ctx.in_forum
+            and self._ctx.thread
+            and text
+            and not text.startswith("/")
+            and not text.startswith("#REGISTER#")
+            and not text.startswith("do_rename:")
+            and not text.startswith("forum_bind:")
+        ):
+            pending_node = self._pending_rename.get(self._ctx.thread)
+            if pending_node:
+                alias = sanitize_alias(text.replace("_", "-"), 20)
+                if alias:
+                    self._pending_rename.pop(self._ctx.thread, None)
+                    self._delete_user_msg(user_msg_id)
+                    user_msg_deleted = True
+                    auth = self._auth_key(chat_id)
+                    self._cmd_do_rename(chat_id, f"do_rename:{pending_node}:{alias}", auth)
+                    return
+
         # 先应答 callback，消除客户端 loading；避免未传 text 导致 TypeError
         if cb_id:
             self.tg.answer_callback(cb_id)
@@ -530,8 +666,17 @@ class MasterHandlers:
         handled = False
 
         if text in ("/start", "/menu"):
-            self._cmd_start(chat_id, msg_id)
-            handled = True
+            if self._ctx.in_forum and self._ctx.thread:
+                node = self._node_for_thread(self._ctx.thread)
+                if node:
+                    self._cmd_manage(chat_id, node, None)
+                    if user_msg_id:
+                        self._delete_user_msg(user_msg_id)
+                        user_msg_deleted = True
+                    handled = True
+            if not handled:
+                self._cmd_start(chat_id, msg_id)
+                handled = True
         elif text == "ignore":
             handled = True
         elif text == "all_ota_confirm":
@@ -604,8 +749,29 @@ class MasterHandlers:
             self._cmd_agent_action(chat_id, text, msg_id, auth)
             handled = True
 
+        if handled and user_msg_id and self._ctx.in_forum and not user_msg_deleted and not cb_id:
+            self._delete_user_msg(user_msg_id)
+
         if not handled and text:
-            self.tg.send_message(chat_id, "未识别的指令，请发送 /start 打开菜单。", markdown=False)
+            if self._ctx.in_forum and self._ctx.thread:
+                node = self._node_for_thread(self._ctx.thread)
+                if node:
+                    self._msg_node(
+                        chat_id,
+                        node,
+                        "⚠️ 未识别的指令。发送 `/start` 打开控制台，或使用下方按钮。",
+                        markdown=False,
+                    )
+                    self._delete_user_msg(user_msg_id)
+                else:
+                    self.tg.send_message(
+                        incoming_chat,
+                        "未识别的指令。",
+                        markdown=False,
+                        message_thread_id=self._ctx.thread,
+                    )
+            else:
+                self.tg.send_message(chat_id, "未识别的指令，请发送 /start 打开菜单。", markdown=False)
 
     def _cmd_start(self, chat_id: str, msg_id: int | None = None) -> None:
         remote = self._remote_version()
@@ -871,10 +1037,11 @@ class MasterHandlers:
     def _cmd_trend_callback(self, chat_id: str, node: str, msg_id: int | None) -> None:
         node = sanitize_node_name(node)
         body = self._trend_text(chat_id, node)
-        kb = [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node}"}]]
-        if self.forum_mode and self._node_thread_id(chat_id, node):
+        kb: list = []
+        if self._in_topic_flow(chat_id, node):
             self._ui_node(chat_id, node, body, kb)
             return
+        kb = [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node}"}]]
         if msg_id:
             self.tg.edit_ui(chat_id, msg_id, body, kb)
         else:
@@ -925,12 +1092,14 @@ class MasterHandlers:
 
     def _cmd_manage(self, chat_id: str, node: str, msg_id: int | None) -> None:
         node = sanitize_node_name(node)
-        text, kb = self._manage_keyboard(chat_id, node)
+        in_topic = self._in_topic_flow(chat_id, node)
+        text, kb = self._manage_keyboard(chat_id, node, for_topic=in_topic)
         if not kb:
             self.tg.send_message(chat_id, "❌ 未找到节点。")
             return
-        if self.forum_mode and self._node_thread_id(chat_id, node):
-            self._ui_node(chat_id, node, text, kb)
+        if in_topic:
+            self._pending_rename.pop(self._node_thread_id(chat_id, node) or 0, None)
+            self._ui_node(chat_id, node, text, kb, on_manage=True)
             return
         if msg_id:
             self.tg.edit_ui(chat_id, msg_id, text, kb)
@@ -962,13 +1131,15 @@ class MasterHandlers:
             f"UPDATE nodes SET {col}=? WHERE chat_id=? AND node_name=?",
             (state, chat_id, node),
         )
-        base, kb = self._manage_keyboard(chat_id, node)
+        base, kb = self._manage_keyboard(
+            chat_id, node, for_topic=self._in_topic_flow(chat_id, node)
+        )
         text_msg = base.replace(
             "请选择操作：",
             f"✅ **执行成功**: 模块 [{mod}] 已设为 {state}\n",
         )
-        if self.forum_mode and self._node_thread_id(chat_id, node):
-            self._ui_node(chat_id, node, text_msg, kb)
+        if self._in_topic_flow(chat_id, node):
+            self._ui_node(chat_id, node, text_msg, kb, on_manage=True)
             return
         if msg_id:
             self.tg.edit_ui(chat_id, msg_id, text_msg, kb)
@@ -984,8 +1155,22 @@ class MasterHandlers:
         if not ok:
             self.tg.send_message(chat_id, "⛔ **安全拦截**：销毁失败。目标节点不存在或您无权越权操作！")
             return
+        thread = self._node_thread_id(chat_id, node)
+        ui_id, _ = self._get_topic_ui(chat_id, node)
+        if thread and ui_id and self.forum_chat_id:
+            self.tg.edit_message(
+                self.forum_chat_id,
+                ui_id,
+                f"🗑️ 已删除节点 `{node}` 及其历史记录。",
+                message_thread_id=thread,
+            )
+            self.tg.edit_reply_markup(
+                self.forum_chat_id, ui_id, [], message_thread_id=thread
+            )
         self.db.execute("DELETE FROM nodes WHERE chat_id=? AND node_name=?", (chat_id, node))
         self.db.execute("DELETE FROM ip_trend_log WHERE node_name=?", (node,))
+        if self._ctx.in_forum:
+            return
         self.tg.send_message(chat_id, f"🗑️ 已删除节点 `{node}` 及其历史记录。")
         kb = self._region_keyboard(chat_id, home_btn=True)
         if kb:
@@ -999,6 +1184,16 @@ class MasterHandlers:
 
     def _cmd_rename(self, chat_id: str, node: str) -> None:
         node = sanitize_node_name(node)
+        thread = self._node_thread_id(chat_id, node)
+        if self._in_topic_flow(chat_id, node) and thread:
+            self._pending_rename[thread] = node
+            self._ui_node(
+                chat_id,
+                node,
+                f"✏️ **重命名节点** `{node}`\n\n请直接发送新别名（最长20字符）。",
+                [[{"text": "❌ 取消", "callback_data": f"manage:{node}"}]],
+            )
+            return
         dest, thread = self._node_tg_dest(chat_id, node)
         self.tg.force_reply_rename(dest, node, message_thread_id=thread)
 
@@ -1010,40 +1205,44 @@ class MasterHandlers:
         alias = sanitize_alias(parts[2], 20)
         info = self._agent_row(chat_id, node)
         if not info:
-            self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
+            self._msg_node(chat_id, node, "❌ 数据库中未找到该节点的通讯地址。")
             return
         ip, port = info
-        self.tg.send_message(chat_id, f"⏳ 正在向节点 `{node}` 下发重命名指令…")
+        if self._in_topic_flow(chat_id, node):
+            self._msg_node(chat_id, node, f"⏳ 正在向节点 `{node}` 下发重命名指令…")
+        else:
+            self.tg.send_message(chat_id, f"⏳ 正在向节点 `{node}` 下发重命名指令…")
         url = generate_signed_url(auth, ip, port, "/trigger_rename") + f"&b64={alias_to_b64(alias)}"
         resp = call_agent(url)
         if resp == "FAILED":
-            self.tg.send_message(chat_id, "❌ 指令下发超时！为防范劫持风险，已终止请求。")
+            result = "❌ 指令下发超时！为防范劫持风险，已终止请求。"
         elif "Action Accepted" in resp:
             self.db.execute(
                 "UPDATE nodes SET node_alias=? WHERE chat_id=? AND node_name=?",
                 (alias, chat_id, node),
             )
-            self.tg.send_message(
-                chat_id,
-                f"✅ 节点别名已更新为: `{alias}`",
-            )
+            result = f"✅ 节点别名已更新为: `{alias}`"
         else:
-            self.tg.send_message(
-                chat_id,
-                f"⚠️ 节点拒绝了请求，请确保 Agent 已更新至 v3.5.2\n(回传信息: `{resp[:200]}`)",
-            )
+            result = f"⚠️ 节点拒绝了请求，请确保 Agent 已更新至 v3.5.2\n(回传信息: `{resp[:200]}`)"
+        if self._in_topic_flow(chat_id, node):
+            if "Action Accepted" in resp:
+                self._cmd_manage(chat_id, node, None)
+            else:
+                self._msg_node(chat_id, node, result, markdown=not result.startswith("❌"))
+        else:
+            self.tg.send_message(chat_id, result)
 
     def _cmd_ota_confirm(self, chat_id: str, node: str) -> None:
         node = sanitize_node_name(node)
         kb = [
             [{"text": "🚨 确认执行远程升级", "callback_data": f"ota_execute:{node}"}],
-            [{"text": "取消", "callback_data": f"manage:{node}"}],
+            [{"text": "❌ 取消", "callback_data": f"manage:{node}"}],
         ]
         body = (
             f"☢️ **操作确认**：即将向 `{node}` 下发 OTA 热更新指令。\n"
             "节点更新完成后会自动发送包含新版本号的注册回执，确定执行？"
         )
-        if self.forum_mode and self._node_thread_id(chat_id, node):
+        if self._in_topic_flow(chat_id, node):
             self._ui_node(chat_id, node, body, kb)
             return
         self.tg.send_ui(chat_id, body, kb)

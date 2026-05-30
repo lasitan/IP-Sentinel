@@ -51,17 +51,21 @@ class TelegramAPI:
 
         if not body.get("ok"):
             desc = str(body.get("description", "")).lower()
-            # Markdown 解析失败时去掉格式重试一次
             if payload.get("parse_mode") and (
                 "can't parse" in desc or "parse entities" in desc or "can't find end" in desc
             ):
                 plain = {k: v for k, v in payload.items() if k != "parse_mode"}
                 return self._post(method, plain)
-            # 内容未变化视为成功
             if method == "editMessageText" and "message is not modified" in desc:
+                return {"ok": True}
+            if method == "deleteMessage" and "message to delete not found" in desc:
                 return {"ok": True}
             self._log_api_error(method, payload, body)
         return body
+
+    def get_me_username(self) -> str:
+        body = self._post("getMe", {})
+        return str((body.get("result") or {}).get("username") or "")
 
     def send_message(
         self,
@@ -70,12 +74,15 @@ class TelegramAPI:
         *,
         markdown: bool = True,
         message_thread_id: int | None = None,
-    ) -> bool:
+    ) -> int | None:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if markdown:
             payload["parse_mode"] = "Markdown"
         self._with_thread(payload, message_thread_id)
-        return bool(self._post("sendMessage", payload).get("ok"))
+        body = self._post("sendMessage", payload)
+        if not body.get("ok"):
+            return None
+        return (body.get("result") or {}).get("message_id")
 
     def send_ui(
         self,
@@ -84,7 +91,7 @@ class TelegramAPI:
         keyboard: list,
         *,
         message_thread_id: int | None = None,
-    ) -> bool:
+    ) -> int | None:
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "text": text,
@@ -92,7 +99,10 @@ class TelegramAPI:
             "reply_markup": {"inline_keyboard": keyboard},
         }
         self._with_thread(payload, message_thread_id)
-        return bool(self._post("sendMessage", payload).get("ok"))
+        body = self._post("sendMessage", payload)
+        if not body.get("ok"):
+            return None
+        return (body.get("result") or {}).get("message_id")
 
     def edit_message(
         self,
@@ -128,10 +138,18 @@ class TelegramAPI:
             "reply_markup": {"inline_keyboard": keyboard},
         }
         self._with_thread(payload, message_thread_id)
-        ok = bool(self._post("editMessageText", payload).get("ok"))
-        if ok:
-            return True
-        return self.send_ui(chat_id, text, keyboard, message_thread_id=message_thread_id)
+        return bool(self._post("editMessageText", payload).get("ok"))
+
+    def delete_message(
+        self,
+        chat_id: str,
+        message_id: int,
+        *,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+        self._with_thread(payload, message_thread_id)
+        return bool(self._post("deleteMessage", payload).get("ok"))
 
     def create_forum_topic(self, chat_id: str, name: str) -> int | None:
         body = self._post(
