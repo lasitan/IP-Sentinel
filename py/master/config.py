@@ -31,8 +31,6 @@ def load_master_config(path: str | None = None) -> dict[str, Any]:
     cfg.setdefault("FORUM_MODE", "false")
     cfg.setdefault("FORUM_CHAT_ID", "")
     cfg.setdefault("FORUM_OWNER_CHAT_ID", "")
-    cfg.setdefault("FORUM_GENERAL_UI_MSG_ID", "")
-    cfg.setdefault("FORUM_GENERAL_UI_EDIT_COUNT", "0")
     return cfg
 
 

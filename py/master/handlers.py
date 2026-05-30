@@ -35,7 +35,6 @@ from master.telegram_api import TelegramAPI
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 TOPIC_UI_MAX_EDITS = 200
-FORUM_GENERAL_UI_MAX_EDITS = 200
 
 
 @dataclass
@@ -169,52 +168,20 @@ class MasterHandlers:
             and self._node_for_thread(self._ctx.thread)
         )
 
-    def _get_general_ui(self) -> tuple[int | None, int]:
-        raw = str(self.cfg.get("FORUM_GENERAL_UI_MSG_ID", ""))
-        msg_id = int(raw) if raw.isdigit() else None
-        edits = int(self.cfg.get("FORUM_GENERAL_UI_EDIT_COUNT") or 0)
-        return msg_id, edits
-
-    def _set_general_ui(self, msg_id: int | None, edit_count: int = 0) -> None:
-        save_master_config_keys(
-            {
-                "FORUM_GENERAL_UI_MSG_ID": str(msg_id or ""),
-                "FORUM_GENERAL_UI_EDIT_COUNT": str(edit_count),
-            },
-        )
-        self.cfg["FORUM_GENERAL_UI_MSG_ID"] = str(msg_id or "")
-        self.cfg["FORUM_GENERAL_UI_EDIT_COUNT"] = str(edit_count)
-
-    def _general_forum_present(
+    def _forum_general_edit(
         self,
         text: str,
         keyboard: list,
-        *,
-        msg_id_override: int | None = None,
+        msg_id: int | None = None,
     ) -> None:
-        """群 General 话题内唯一 Bot 主菜单消息."""
+        """General 仅编辑当前 callback 消息；唯一 Bot 消息只在各节点话题内."""
         dest = self.forum_chat_id
         thread = self._ctx.thread
-        ui_id, edits = self._get_general_ui()
-        if msg_id_override:
-            ui_id = msg_id_override
-
-        def _fresh_send() -> None:
-            nonlocal ui_id
-            if ui_id:
-                self.tg.delete_message(dest, ui_id, message_thread_id=thread)
-            new_id = self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
-            if new_id:
-                ui_id = new_id
-                self._set_general_ui(new_id, 0)
-
-        if not ui_id or edits >= FORUM_GENERAL_UI_MAX_EDITS:
-            _fresh_send()
-            return
-        if self.tg.edit_ui(dest, ui_id, text, keyboard, message_thread_id=thread):
-            self._set_general_ui(ui_id, edits + 1)
+        mid = msg_id or self._ctx.msg_id
+        if mid:
+            self.tg.edit_ui(dest, mid, text, keyboard, message_thread_id=thread)
         else:
-            _fresh_send()
+            self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
 
     def _forum_menu(
         self,
@@ -224,7 +191,7 @@ class MasterHandlers:
         *,
         on_manage: bool = False,
     ) -> None:
-        """群聊菜单：节点话题走节点单消息，General 走全局单消息."""
+        """群聊菜单：节点话题走节点单消息，General 仅编辑当前消息."""
         if self._is_node_topic():
             node = self._node_for_thread(self._ctx.thread)
             assert node
@@ -233,7 +200,7 @@ class MasterHandlers:
             )
             return
         if self._ctx.chat == self.forum_chat_id:
-            self._general_forum_present(text, keyboard, msg_id_override=msg_id)
+            self._forum_general_edit(text, keyboard, msg_id)
             return
         if msg_id:
             self.tg.edit_ui(self._ctx.owner, msg_id, text, keyboard)
@@ -401,7 +368,14 @@ class MasterHandlers:
             return
         self.tg.send_message(dest, text, markdown=markdown, message_thread_id=thread)
 
-    def _push_topic_to_agent(self, owner_chat_id: str, node: str, auth: str) -> None:
+    def _push_topic_to_agent(
+        self,
+        owner_chat_id: str,
+        node: str,
+        auth: str,
+        *,
+        sync: bool = False,
+    ) -> None:
         info = self._agent_row(owner_chat_id, node)
         thread = self._node_thread_id(owner_chat_id, node)
         if not info or not thread:
@@ -416,7 +390,10 @@ class MasterHandlers:
             params["bot_msg_id"] = str(ui_id)
         q = urllib.parse.urlencode(params)
         url = generate_signed_url(auth, ip, port, "/trigger_set_topic") + "&" + q
-        threading.Thread(target=call_agent, args=(url,), daemon=True).start()
+        if sync:
+            call_agent(url)
+        else:
+            threading.Thread(target=call_agent, args=(url,), daemon=True).start()
 
     def _setup_node_topic(
         self,
@@ -601,6 +578,41 @@ class MasterHandlers:
                 url = generate_signed_url(auth, row["agent_ip"], row["agent_port"], path)
                 call_agent(url)
                 time.sleep(delay)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _fanout_reports(self, chat_id: str) -> None:
+        """全部报告：预写各节点话题单消息并同步 Agent 后再触发 report."""
+        rows = self.db.execute(
+            "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=?",
+            (chat_id,),
+        )
+        auth = self._auth_key(chat_id)
+
+        def _worker() -> None:
+            for row in rows:
+                node = row["node_name"]
+                if self.forum_mode and self._node_thread_id(chat_id, node):
+                    alias = (
+                        self.db.scalar(
+                            "SELECT COALESCE(node_alias, node_name) FROM nodes WHERE chat_id=? AND node_name=?",
+                            (chat_id, node),
+                        )
+                        or node
+                    )
+                    kb = [[{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node}"}]]
+                    self._topic_present(
+                        chat_id,
+                        node,
+                        f"⏳ 正在生成 `{alias}` 报告…",
+                        kb,
+                    )
+                    self._push_topic_to_agent(chat_id, node, auth, sync=True)
+                url = generate_signed_url(
+                    auth, row["agent_ip"], row["agent_port"], "/trigger_report"
+                )
+                call_agent(url)
+                time.sleep(2.0)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -810,7 +822,7 @@ class MasterHandlers:
             self._cmd_master_ota_execute(chat_id, msg_id)
             handled = True
         elif text == "all_reports":
-            self._cmd_all_reports(chat_id)
+            self._cmd_all_reports(chat_id, msg_id)
             handled = True
         elif text == "all_run":
             self._cmd_all_run(chat_id)
@@ -938,7 +950,7 @@ class MasterHandlers:
             msg += (
                 f"\n\n📌 **话题模式已开启**\n"
                 f"群组 `{self.forum_chat_id}` 中每个节点有独立话题；"
-                "节点控制台、日志与报告均在对应话题内维护。"
+                "控制台、日志与报告均在对应节点话题内维护（General 仅作操作入口）。"
             )
         dest, thread = self._reply_chat()
         if self._ctx.chat == self.forum_chat_id:
@@ -1085,28 +1097,38 @@ class MasterHandlers:
         except (subprocess.CalledProcessError, OSError):
             self.tg.send_message(chat_id, "❌ OTA 下载 install_master.sh 失败。")
 
-    def _cmd_all_reports(self, chat_id: str) -> None:
+    def _cmd_all_reports(self, chat_id: str, msg_id: int | None = None) -> None:
         back = [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]]
         if not self.db.scalar("SELECT 1 FROM nodes WHERE chat_id=? LIMIT 1", (chat_id,)):
             msg = "⚠️ 您名下暂无在线节点。"
             if self._ctx.chat == self.forum_chat_id:
-                self._forum_menu(msg, back)
+                self._forum_menu(msg, back, msg_id)
             else:
                 dest, thread = self._reply_chat()
                 self.tg.send_message(
                     dest, msg, markdown=False, message_thread_id=thread
                 )
             return
-        msg = (
-            "📢 正在向全部节点请求报告…\n"
-            "*(为避免 Telegram 限流，将依次发送，请稍候)*"
+        in_general = (
+            self._ctx.chat == self.forum_chat_id and not self._is_node_topic()
         )
-        if self._ctx.chat == self.forum_chat_id:
-            self._forum_menu(msg, back)
+        if in_general:
+            msg = (
+                "📢 已向各节点话题下发报告请求。\n"
+                "请进入对应节点话题查看（依次生成，请稍候）。"
+            )
+            self._forum_menu(msg, back, msg_id)
         else:
-            dest, thread = self._reply_chat()
-            self.tg.send_message(dest, msg, message_thread_id=thread)
-        self._fanout_agents(chat_id, "/trigger_report", delay=2.0)
+            msg = (
+                "📢 正在向全部节点请求报告…\n"
+                "*(为避免 Telegram 限流，将依次发送，请稍候)*"
+            )
+            if self._ctx.chat == self.forum_chat_id:
+                self._forum_menu(msg, back, msg_id)
+            else:
+                dest, thread = self._reply_chat()
+                self.tg.send_message(dest, msg, message_thread_id=thread)
+        self._fanout_reports(chat_id)
 
     def _cmd_all_run(self, chat_id: str) -> None:
         back = [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]]

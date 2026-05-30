@@ -344,12 +344,6 @@ if [ "$UPGRADE_MODE" == "true" ]; then
     if ! grep -q "^FORUM_OWNER_CHAT_ID=" "${MASTER_DIR}/master.conf"; then
         echo "FORUM_OWNER_CHAT_ID=\"\"" >> "${MASTER_DIR}/master.conf"
     fi
-    if ! grep -q "^FORUM_GENERAL_UI_MSG_ID=" "${MASTER_DIR}/master.conf"; then
-        echo "FORUM_GENERAL_UI_MSG_ID=\"\"" >> "${MASTER_DIR}/master.conf"
-    fi
-    if ! grep -q "^FORUM_GENERAL_UI_EDIT_COUNT=" "${MASTER_DIR}/master.conf"; then
-        echo "FORUM_GENERAL_UI_EDIT_COUNT=\"0\"" >> "${MASTER_DIR}/master.conf"
-    fi
 fi
 
 # ----------------------------------------------------------
