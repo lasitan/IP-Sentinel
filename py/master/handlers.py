@@ -14,6 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from master.agent_client import call_agent
 from master.config import save_master_config_keys
 from master.db import MasterDB
 from master.flags import get_flag
