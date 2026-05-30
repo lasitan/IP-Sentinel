@@ -153,15 +153,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             busy, holder = browser_busy()
             msg_raw = query.get("msg_id", [""])[0]
             edit_msg_id = int(msg_raw) if str(msg_raw).isdigit() else None
-            if edit_msg_id:
-                self._webhook_log("INFO ", f"收到 Master 指令: 刷新日志 (msg_id={edit_msg_id})")
-            elif busy:
+            if busy and edit_msg_id is None:
                 self._webhook_log(
                     "INFO ",
                     f"收到拉取日志；Google 纠偏进行中 (pid={holder})，仅读取日志。",
                 )
-            else:
-                self._webhook_log("INFO ", "收到 Master 指令: 拉取日志 (/trigger_log)")
             self._ok(b"Action Accepted: fetch_log\n")
             cfg_snapshot = self._cfg()
             threading.Thread(
@@ -172,7 +168,6 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if req_path == "/trigger_set_topic":
-            self._webhook_log("INFO ", "收到 Master 指令: 绑定论坛话题 (/trigger_set_topic)")
             self._handle_set_topic(query)
             return
 
