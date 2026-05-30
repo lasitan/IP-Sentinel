@@ -1,4 +1,4 @@
-"""Agent 侧 Telegram 推送（Markdown 转义与解析失败重试）."""
+"""Agent 侧 Telegram 推送（Markdown 转义、话题单消息编辑）."""
 
 from __future__ import annotations
 
@@ -49,7 +49,6 @@ def build_svq_callback(
     cb = "|".join(parts)
     if len(cb.encode("utf-8")) <= max_bytes:
         return cb
-    # 超长时逐步缩短尾部字段
     cb = "|".join([parts[0], parts[1], parts[2], parts[3][:4], parts[4][:6], parts[5][:6]])
     enc = cb.encode("utf-8")
     if len(enc) <= max_bytes:
@@ -72,6 +71,11 @@ def tg_delivery(cfg: dict[str, object]) -> tuple[str, int | None]:
     raw = cfg.get("MESSAGE_THREAD_ID", "")
     thread = int(raw) if str(raw).isdigit() else None
     return chat, thread
+
+
+def tg_topic_bot_id(cfg: dict[str, object]) -> int | None:
+    raw = cfg.get("TOPIC_BOT_MESSAGE_ID", "")
+    return int(raw) if str(raw).isdigit() else None
 
 
 def apply_thread(payload: dict[str, object], thread_id: int | None) -> dict[str, object]:
@@ -117,3 +121,30 @@ def tg_post(api_url: str, payload: dict[str, object], *, timeout: int = 30) -> t
             return True, "plain"
         return False, err2
     return False, err
+
+
+def tg_push(cfg: dict[str, object], payload: dict[str, object], *, timeout: int = 30) -> tuple[bool, str]:
+    """
+    统一推送：话题模式只编辑 TOPIC_BOT_MESSAGE_ID，禁止新发第二条 Bot 消息。
+    非话题模式走 sendMessage。
+    """
+    api_url = str(cfg.get("TG_API_URL") or "")
+    chat, thread = tg_delivery(cfg)
+    if not api_url or not chat:
+        return False, "TG not configured"
+
+    body = dict(payload)
+    bot_msg_id = tg_topic_bot_id(cfg)
+
+    if thread:
+        if not bot_msg_id:
+            return False, "topic mode: TOPIC_BOT_MESSAGE_ID unset"
+        body["chat_id"] = chat
+        body["message_id"] = bot_msg_id
+        apply_thread(body, thread)
+        url = tg_method_url(api_url, "editMessageText")
+        return tg_post(url, body, timeout=timeout)
+
+    body["chat_id"] = chat
+    apply_thread(body, thread)
+    return tg_post(api_url, body, timeout=timeout)

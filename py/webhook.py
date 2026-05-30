@@ -30,7 +30,7 @@ from config import DEFAULT_INSTALL_DIR
 from log_util import log as agent_log
 from log_util import tail_log_file
 from task_lock import browser_busy
-from tg_util import apply_thread, tg_delivery, tg_method_url, tg_post
+from tg_util import apply_thread, tg_delivery, tg_method_url, tg_post, tg_push
 
 PY_DIR = Path(__file__).resolve().parent
 INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
@@ -230,7 +230,8 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self._plain_response(503, f"503 Service Unavailable: {script} missing\n".encode())
 
     def _handle_log_async(self, cfg: dict[str, str], edit_msg_id: int | None = None) -> None:
-        """后台拉日志，避免阻塞 HTTPS 线程；不启动任何维护子进程."""
+        """后台拉日志；话题模式编辑唯一 Bot 消息，不新发."""
+        del edit_msg_id  # 统一使用 TOPIC_BOT_MESSAGE_ID
         try:
             install = cfg.get("INSTALL_DIR", INSTALL_DIR)
             log_path = f"{install}/logs/sentinel.log"
@@ -241,35 +242,24 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             alias = cfg.get("NODE_ALIAS", cfg.get("NODE_NAME", "Unknown-Node"))
             text = f"📄 <b>[{alias}] 实时日志 (v{ver}):</b>\n<pre><code>{log_data}</code></pre>"
             node_cb = cfg.get("NODE_NAME", "Unknown")
-            keyboard = [
-                [{"text": "🔄 刷新日志", "callback_data": f"log_refresh:{node_cb}"}],
-                [{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node_cb}"}],
-            ]
             payload: dict[str, object] = {
-                "chat_id": cfg.get("CHAT_ID", ""),
                 "text": text,
                 "parse_mode": "HTML",
-                "reply_markup": {"inline_keyboard": keyboard},
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "🔄 刷新日志", "callback_data": f"log_refresh:{node_cb}"}],
+                        [{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node_cb}"}],
+                    ]
+                },
             }
-            dest_chat, thread_id = tg_delivery(cfg)
-            payload["chat_id"] = dest_chat
-            apply_thread(payload, thread_id)
-            api_base = cfg.get("TG_API_URL", "")
-            if not api_base or not cfg.get("CHAT_ID"):
+            if not cfg.get("TG_API_URL") or not cfg.get("CHAT_ID"):
                 agent_log(cfg, "Webhook", "ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
                 return
-            if edit_msg_id:
-                payload["message_id"] = edit_msg_id
-                api_url = tg_method_url(api_base, "editMessageText")
-                action = "更新"
-            else:
-                api_url = api_base
-                action = "推送"
-            ok, err = tg_post(api_url, payload, timeout=15)
+            ok, err = tg_push(cfg, payload, timeout=15)
             if ok:
-                agent_log(cfg, "Webhook", "INFO ", f"实时日志已{action}至 Telegram")
+                agent_log(cfg, "Webhook", "INFO ", "实时日志已更新至话题 Bot 消息")
             else:
-                agent_log(cfg, "Webhook", "WARN ", f"Telegram {action}失败: {err}")
+                agent_log(cfg, "Webhook", "WARN ", f"Telegram 日志更新失败: {err}")
         except Exception as exc:
             agent_log(cfg, "Webhook", "ERROR", f"拉取日志推送失败: {exc}")
 
@@ -295,16 +285,24 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
     def _handle_set_topic(self, query: dict) -> None:
         dest = re.sub(r"[^0-9-]", "", query.get("dest_chat", [""])[0])[:20]
         thread_raw = query.get("thread_id", [""])[0]
+        bot_raw = query.get("bot_msg_id", [""])[0]
         if not dest or not str(thread_raw).isdigit():
             self.send_response(400)
             self.end_headers()
             self.wfile.write(b"400 Bad Request: dest_chat/thread_id required\n")
             return
         try:
-            self._config_set_keys(
-                {"TG_DEST_CHAT_ID": dest, "MESSAGE_THREAD_ID": str(int(thread_raw))}
+            updates = {
+                "TG_DEST_CHAT_ID": dest,
+                "MESSAGE_THREAD_ID": str(int(thread_raw)),
+            }
+            if str(bot_raw).isdigit():
+                updates["TOPIC_BOT_MESSAGE_ID"] = str(int(bot_raw))
+            self._config_set_keys(updates)
+            self._webhook_log(
+                "INFO ",
+                f"已绑定话题: chat={dest} thread={thread_raw} bot_msg={bot_raw or '-'}",
             )
-            self._webhook_log("INFO ", f"已绑定话题: chat={dest} thread={thread_raw}")
             self._ok(b"Action Accepted: set_topic\n")
         except Exception as exc:
             self._webhook_log("ERROR", f"绑定话题失败: {exc}")

@@ -19,7 +19,7 @@ from config import load_config
 from log_util import log
 from network import build_curl_context
 from session_stats import latest_snapshot, load_sessions, summarize_google, summarize_trust
-from tg_util import apply_thread, tg_delivery
+from tg_util import tg_delivery, tg_push
 
 MODULE = "Report"
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
@@ -122,25 +122,11 @@ def _send_telegram(cfg: dict, payload: dict) -> bool:
     if not api_url or not dest_chat:
         log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法发送报告")
         return False
-    payload["chat_id"] = dest_chat
-    apply_thread(payload, thread_id)
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        api_url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode(errors="ignore")
-            if '"ok":true' in body:
-                return True
-            log(cfg, MODULE, "WARN ", f"Telegram 返回异常: {body[:200]}")
-            return False
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        log(cfg, MODULE, "ERROR", f"Telegram 发送失败: {exc}")
-        return False
+    ok, err = tg_push(cfg, payload)
+    if ok:
+        return True
+    log(cfg, MODULE, "WARN ", f"Telegram 返回异常: {err}")
+    return False
 
 
 def run() -> int:
@@ -248,7 +234,7 @@ def run() -> int:
         "parse_mode": "Markdown",
         "disable_web_page_preview": True,
         "reply_markup": {
-            "inline_keyboard": [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node_name}"}]]
+            "inline_keyboard": [[{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node_name}"}]]
         },
     }
 

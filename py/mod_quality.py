@@ -12,7 +12,7 @@ from config import require_config
 from ip_quality_probe import run_quality_probe
 from log_util import log
 from session_stats import record_quality_session
-from tg_util import apply_thread, build_svq_callback, escape_markdown, tg_delivery, tg_post
+from tg_util import apply_thread, build_svq_callback, escape_markdown, tg_delivery, tg_push
 
 MODULE = "Quality"
 
@@ -82,9 +82,7 @@ def _tg_post(cfg: dict, payload: dict) -> bool:
     if not api_url or not dest_chat:
         log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法推送质量报告")
         return False
-    payload = {**payload, "chat_id": dest_chat}
-    apply_thread(payload, thread_id)
-    ok, err = tg_post(api_url, payload)
+    ok, err = tg_push(cfg, payload)
     if ok:
         if err == "plain":
             log(cfg, MODULE, "WARN ", "Markdown 解析失败，已降级为纯文本推送")
@@ -227,7 +225,7 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
         "reply_markup": {
             "inline_keyboard": [
                 [{"text": "📥 将本次体检录入趋势库", "callback_data": cb}],
-                [{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node_name}"}],
+                [{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node_name}"}],
             ]
         },
     }
