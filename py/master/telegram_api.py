@@ -28,6 +28,12 @@ class TelegramAPI:
         desc = body.get("description", body)
         print(f"[ip-sentinel-master] Telegram {method} failed: {desc}", file=sys.stderr, flush=True)
 
+    @staticmethod
+    def _with_thread(payload: dict[str, Any], message_thread_id: int | None) -> dict[str, Any]:
+        if message_thread_id:
+            payload["message_thread_id"] = message_thread_id
+        return payload
+
     def _post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -57,55 +63,85 @@ class TelegramAPI:
             self._log_api_error(method, payload, body)
         return body
 
-    def send_message(self, chat_id: str, text: str, *, markdown: bool = True) -> bool:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        markdown: bool = True,
+        message_thread_id: int | None = None,
+    ) -> bool:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if markdown:
             payload["parse_mode"] = "Markdown"
+        self._with_thread(payload, message_thread_id)
         return bool(self._post("sendMessage", payload).get("ok"))
 
-    def send_ui(self, chat_id: str, text: str, keyboard: list) -> bool:
-        return bool(
-            self._post(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": {"inline_keyboard": keyboard},
-                },
-            ).get("ok")
-        )
+    def send_ui(
+        self,
+        chat_id: str,
+        text: str,
+        keyboard: list,
+        *,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "reply_markup": {"inline_keyboard": keyboard},
+        }
+        self._with_thread(payload, message_thread_id)
+        return bool(self._post("sendMessage", payload).get("ok"))
 
-    def edit_message(self, chat_id: str, message_id: int, text: str) -> bool:
-        return bool(
-            self._post(
-                "editMessageText",
-                {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                },
-            ).get("ok")
-        )
+    def edit_message(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        *,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        }
+        self._with_thread(payload, message_thread_id)
+        return bool(self._post("editMessageText", payload).get("ok"))
 
-    def edit_ui(self, chat_id: str, message_id: int, text: str, keyboard: list) -> bool:
-        ok = bool(
-            self._post(
-                "editMessageText",
-                {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": {"inline_keyboard": keyboard},
-                },
-            ).get("ok")
-        )
+    def edit_ui(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        keyboard: list,
+        *,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "reply_markup": {"inline_keyboard": keyboard},
+        }
+        self._with_thread(payload, message_thread_id)
+        ok = bool(self._post("editMessageText", payload).get("ok"))
         if ok:
             return True
-        # 编辑失败时发新消息，避免用户感觉“没反应”
-        return self.send_ui(chat_id, text, keyboard)
+        return self.send_ui(chat_id, text, keyboard, message_thread_id=message_thread_id)
+
+    def create_forum_topic(self, chat_id: str, name: str) -> int | None:
+        body = self._post(
+            "createForumTopic",
+            {"chat_id": chat_id, "name": name[:128]},
+        )
+        if not body.get("ok"):
+            return None
+        thread = (body.get("result") or {}).get("message_thread_id")
+        return int(thread) if thread else None
 
     def answer_callback(self, callback_id: str, text: str = "", *, alert: bool = False) -> None:
         payload: dict[str, Any] = {
@@ -116,31 +152,40 @@ class TelegramAPI:
             payload["text"] = text[:200]
         self._post("answerCallbackQuery", payload)
 
-    def edit_reply_markup(self, chat_id: str, message_id: int, keyboard: list) -> bool:
-        return bool(
-            self._post(
-                "editMessageReplyMarkup",
-                {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "reply_markup": {"inline_keyboard": keyboard},
-                },
-            ).get("ok")
-        )
+    def edit_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        keyboard: list,
+        *,
+        message_thread_id: int | None = None,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": {"inline_keyboard": keyboard},
+        }
+        self._with_thread(payload, message_thread_id)
+        return bool(self._post("editMessageReplyMarkup", payload).get("ok"))
 
-    def force_reply_rename(self, chat_id: str, node_name: str) -> None:
-        self._post(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": (
-                    f"✏️ 请回复本消息以重命名节点:\n`{escape_markdown(node_name)}`\n"
-                    "(仅限中英文、数字，最长20字符)"
-                ),
-                "parse_mode": "Markdown",
-                "reply_markup": {"force_reply": True},
-            },
-        )
+    def force_reply_rename(
+        self,
+        chat_id: str,
+        node_name: str,
+        *,
+        message_thread_id: int | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": (
+                f"✏️ 请回复本消息以重命名节点:\n`{escape_markdown(node_name)}`\n"
+                "(仅限中英文、数字，最长20字符)"
+            ),
+            "parse_mode": "Markdown",
+            "reply_markup": {"force_reply": True},
+        }
+        self._with_thread(payload, message_thread_id)
+        self._post("sendMessage", payload)
 
     def get_updates(self, offset: int, timeout: int = 30) -> list[dict[str, Any]]:
         url = f"{self.base}/getUpdates?offset={offset}&timeout={timeout}"

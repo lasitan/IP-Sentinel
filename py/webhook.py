@@ -30,7 +30,7 @@ from config import DEFAULT_INSTALL_DIR
 from log_util import log as agent_log
 from log_util import tail_log_file
 from task_lock import browser_busy
-from tg_util import tg_method_url, tg_post
+from tg_util import apply_thread, tg_delivery, tg_method_url, tg_post
 
 PY_DIR = Path(__file__).resolve().parent
 INSTALL_DIR = os.environ.get("IP_SENTINEL_INSTALL_DIR", DEFAULT_INSTALL_DIR)
@@ -171,6 +171,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             ).start()
             return
 
+        if req_path == "/trigger_set_topic":
+            self._webhook_log("INFO ", "收到 Master 指令: 绑定论坛话题 (/trigger_set_topic)")
+            self._handle_set_topic(query)
+            return
+
         if req_path == "/trigger_quality":
             self._dispatch_spawn("mod_quality.py", "IP 质量检测 (/trigger_quality)")
             return
@@ -246,6 +251,9 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": keyboard},
             }
+            dest_chat, thread_id = tg_delivery(cfg)
+            payload["chat_id"] = dest_chat
+            apply_thread(payload, thread_id)
             api_base = cfg.get("TG_API_URL", "")
             if not api_base or not cfg.get("CHAT_ID"):
                 agent_log(cfg, "Webhook", "ERROR", "拉取日志：未配置 TG_API_URL/CHAT_ID")
@@ -264,6 +272,45 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 agent_log(cfg, "Webhook", "WARN ", f"Telegram {action}失败: {err}")
         except Exception as exc:
             agent_log(cfg, "Webhook", "ERROR", f"拉取日志推送失败: {exc}")
+
+    def _config_set_keys(self, updates: dict[str, str]) -> None:
+        with open(CONFIG_PATH, "r+", encoding="utf-8", errors="ignore") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            lines = f.readlines()
+            for key, val in updates.items():
+                prefix = f"{key}="
+                found = False
+                for i, line in enumerate(lines):
+                    if line.startswith(prefix):
+                        lines[i] = f'{prefix}"{val}"\n'
+                        found = True
+                        break
+                if not found:
+                    lines.append(f'{prefix}"{val}"\n')
+            f.seek(0)
+            f.writelines(lines)
+            f.truncate()
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+    def _handle_set_topic(self, query: dict) -> None:
+        dest = re.sub(r"[^0-9-]", "", query.get("dest_chat", [""])[0])[:20]
+        thread_raw = query.get("thread_id", [""])[0]
+        if not dest or not str(thread_raw).isdigit():
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(b"400 Bad Request: dest_chat/thread_id required\n")
+            return
+        try:
+            self._config_set_keys(
+                {"TG_DEST_CHAT_ID": dest, "MESSAGE_THREAD_ID": str(int(thread_raw))}
+            )
+            self._webhook_log("INFO ", f"已绑定话题: chat={dest} thread={thread_raw}")
+            self._ok(b"Action Accepted: set_topic\n")
+        except Exception as exc:
+            self._webhook_log("ERROR", f"绑定话题失败: {exc}")
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(f"500 Internal Error: {exc}\n".encode())
 
     def _handle_rename(self, query: dict) -> None:
         self._webhook_log("INFO ", "收到 Master 指令: 重命名节点 (/trigger_rename)")

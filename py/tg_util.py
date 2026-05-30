@@ -66,6 +66,20 @@ def tg_method_url(api_url: str, method: str) -> str:
     return f"{api_url.rstrip('/')}/{method}"
 
 
+def tg_delivery(cfg: dict[str, object]) -> tuple[str, int | None]:
+    """Agent 推送目标 chat_id 与 forum topic thread_id."""
+    chat = str(cfg.get("TG_DEST_CHAT_ID") or cfg.get("CHAT_ID") or "")
+    raw = cfg.get("MESSAGE_THREAD_ID", "")
+    thread = int(raw) if str(raw).isdigit() else None
+    return chat, thread
+
+
+def apply_thread(payload: dict[str, object], thread_id: int | None) -> dict[str, object]:
+    if thread_id:
+        payload["message_thread_id"] = thread_id
+    return payload
+
+
 def tg_post(api_url: str, payload: dict[str, object], *, timeout: int = 30) -> tuple[bool, str]:
     """
     发送 Telegram JSON。Markdown 解析失败时去掉 parse_mode 重试一次。

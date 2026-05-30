@@ -294,6 +294,27 @@ if [ "$UPGRADE_MODE" == "false" ]; then
         fi
     fi
 
+    echo -e "\n[2.2/4] 论坛话题模式 (Forum Topics)"
+    echo -e "💡 开启后，每个节点自动在指定超级群组中创建独立话题，"
+    echo -e "   日志/报告/控制台操作均在对应话题内进行。"
+    echo -e "   需先将 Bot 加入群组并设为管理员（含「管理话题」权限），"
+    echo -e "   并在群组设置中开启 Topics。"
+    read -p "是否启用论坛话题模式？(y/n, 默认 n): " FORUM_CHOICE
+    FORUM_MODE="false"
+    FORUM_CHAT_ID=""
+    if [[ "$FORUM_CHOICE" =~ ^[Yy]$ ]]; then
+        FORUM_MODE="true"
+        echo -e "\033[33m💡 请将 Bot 拉入目标超级群组，发送任意消息后，"
+        echo -e "   可通过 @getidsbot 或 @RawDataBot 获取群组 Chat ID（通常为 -100 开头）。\033[0m"
+        read -p "请输入超级群组 Chat ID: " RAW_FORUM_ID
+        FORUM_CHAT_ID=$(echo "$RAW_FORUM_ID" | tr -cd '0-9-')
+        while [ -z "$FORUM_CHAT_ID" ]; do
+            read -p "⚠️ Chat ID 不能为空，请重新输入: " RAW_FORUM_ID
+            FORUM_CHAT_ID=$(echo "$RAW_FORUM_ID" | tr -cd '0-9-')
+        done
+        echo -e "✅ \033[32m已启用话题模式，群组 ID: ${FORUM_CHAT_ID}\033[0m"
+    fi
+
     cat > "${MASTER_DIR}/master.conf" << EOF
 # IP-Sentinel Master 本地固化配置 (v${TARGET_VERSION})
 MASTER_VERSION="$TARGET_VERSION"
@@ -302,6 +323,8 @@ DB_FILE="$DB_FILE"
 MASTER_DIR="$MASTER_DIR"
 IS_OFFICIAL_GATEWAY="$IS_OFFICIAL_GATEWAY"
 ENABLE_MASTER_OTA="$ENABLE_MASTER_OTA"
+FORUM_MODE="$FORUM_MODE"
+FORUM_CHAT_ID="$FORUM_CHAT_ID"
 EOF
 fi
 
@@ -311,6 +334,12 @@ if [ "$UPGRADE_MODE" == "true" ]; then
     fi
     if ! grep -q "^ENABLE_MASTER_OTA=" "${MASTER_DIR}/master.conf"; then
         echo "ENABLE_MASTER_OTA=\"false\"" >> "${MASTER_DIR}/master.conf"
+    fi
+    if ! grep -q "^FORUM_MODE=" "${MASTER_DIR}/master.conf"; then
+        echo "FORUM_MODE=\"false\"" >> "${MASTER_DIR}/master.conf"
+    fi
+    if ! grep -q "^FORUM_CHAT_ID=" "${MASTER_DIR}/master.conf"; then
+        echo "FORUM_CHAT_ID=\"\"" >> "${MASTER_DIR}/master.conf"
     fi
 fi
 

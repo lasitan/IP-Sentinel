@@ -19,6 +19,7 @@ from config import load_config
 from log_util import log
 from network import build_curl_context
 from session_stats import latest_snapshot, load_sessions, summarize_google, summarize_trust
+from tg_util import apply_thread, tg_delivery
 
 MODULE = "Report"
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
@@ -117,9 +118,12 @@ def _remote_agent_version() -> str:
 
 def _send_telegram(cfg: dict, payload: dict) -> bool:
     api_url = cfg.get("TG_API_URL", "")
-    if not api_url or not cfg.get("CHAT_ID"):
+    dest_chat, thread_id = tg_delivery(cfg)
+    if not api_url or not dest_chat:
         log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法发送报告")
         return False
+    payload["chat_id"] = dest_chat
+    apply_thread(payload, thread_id)
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         api_url,
@@ -240,7 +244,6 @@ def run() -> int:
         )
 
     payload = {
-        "chat_id": cfg["CHAT_ID"],
         "text": msg,
         "parse_mode": "Markdown",
         "disable_web_page_preview": True,

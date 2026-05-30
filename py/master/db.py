@@ -54,6 +54,7 @@ class MasterDB:
                 ("enable_google", "ALTER TABLE nodes ADD COLUMN enable_google TEXT DEFAULT 'true'"),
                 ("enable_trust", "ALTER TABLE nodes ADD COLUMN enable_trust TEXT DEFAULT 'true'"),
                 ("enable_ota", "ALTER TABLE nodes ADD COLUMN enable_ota TEXT DEFAULT 'false'"),
+                ("message_thread_id", "ALTER TABLE nodes ADD COLUMN message_thread_id INTEGER"),
                 ("goog_status", "ALTER TABLE ip_trend_log ADD COLUMN goog_status TEXT DEFAULT 'Unknown'"),
                 ("gpt_status", "ALTER TABLE ip_trend_log ADD COLUMN gpt_status TEXT DEFAULT 'Unknown'"),
             ):

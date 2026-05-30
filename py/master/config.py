@@ -28,6 +28,8 @@ def load_master_config(path: str | None = None) -> dict[str, Any]:
     cfg.setdefault("MASTER_VERSION", "4.1.1")
     cfg.setdefault("IS_OFFICIAL_GATEWAY", "false")
     cfg.setdefault("ENABLE_MASTER_OTA", "false")
+    cfg.setdefault("FORUM_MODE", "false")
+    cfg.setdefault("FORUM_CHAT_ID", "")
     return cfg
 
 

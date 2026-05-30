@@ -12,7 +12,7 @@ from config import require_config
 from ip_quality_probe import run_quality_probe
 from log_util import log
 from session_stats import record_quality_session
-from tg_util import build_svq_callback, escape_markdown, tg_post
+from tg_util import apply_thread, build_svq_callback, escape_markdown, tg_delivery, tg_post
 
 MODULE = "Quality"
 
@@ -78,11 +78,12 @@ def _google_cn_warning(data: dict) -> str:
 
 def _tg_post(cfg: dict, payload: dict) -> bool:
     api_url = cfg.get("TG_API_URL", "")
-    chat_id = cfg.get("CHAT_ID", "")
-    if not api_url or not chat_id:
+    dest_chat, thread_id = tg_delivery(cfg)
+    if not api_url or not dest_chat:
         log(cfg, MODULE, "ERROR", "未配置 TG_API_URL/CHAT_ID，无法推送质量报告")
         return False
-    payload = {**payload, "chat_id": chat_id}
+    payload = {**payload, "chat_id": dest_chat}
+    apply_thread(payload, thread_id)
     ok, err = tg_post(api_url, payload)
     if ok:
         if err == "plain":

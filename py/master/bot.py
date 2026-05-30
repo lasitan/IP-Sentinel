@@ -14,7 +14,9 @@ from master.handlers import MasterHandlers
 from master.telegram_api import TelegramAPI
 
 
-def _extract_update(update: dict[str, Any]) -> tuple[str, str, str | None, int | None, str]:
+def _extract_update(
+    update: dict[str, Any],
+) -> tuple[str, str, str | None, int | None, int | None, str]:
     msg = update.get("message") or {}
     cb = update.get("callback_query") or {}
     cb_msg = cb.get("message") or {}
@@ -23,8 +25,10 @@ def _extract_update(update: dict[str, Any]) -> tuple[str, str, str | None, int |
     text = (msg.get("text") or cb.get("data") or "").strip()
     cb_id = cb.get("id")
     msg_id = cb_msg.get("message_id")
+    thread_raw = msg.get("message_thread_id") or cb_msg.get("message_thread_id")
+    thread_id = int(thread_raw) if thread_raw else None
     reply_to = (msg.get("reply_to_message") or {}).get("text") or ""
-    return chat_id, text, cb_id, msg_id, reply_to
+    return chat_id, text, cb_id, msg_id, thread_id, reply_to
 
 
 def run() -> None:
@@ -51,7 +55,7 @@ def run() -> None:
             uid = update.get("update_id", 0)
             next_offset = uid + 1
 
-            chat_id, text, cb_id, msg_id, reply_to = _extract_update(update)
+            chat_id, text, cb_id, msg_id, thread_id, reply_to = _extract_update(update)
             if not chat_id:
                 offset_file.write_text(str(next_offset), encoding="utf-8")
                 continue
@@ -62,6 +66,7 @@ def run() -> None:
                     text,
                     cb_id=cb_id,
                     msg_id=msg_id,
+                    thread_id=thread_id,
                     reply_to_text=reply_to,
                 )
             except Exception:
