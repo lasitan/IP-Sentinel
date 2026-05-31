@@ -1,4 +1,9 @@
 ig
+nba
+fotmob
+sports
+live
+champions league final
 psg
 min aung hlaing
 champions league
@@ -10,7 +15,6 @@ outlook
 palace vs rayo vallecano
 သီချင်း
 mpl ph
-nba
 afghanistan
 inter miami vs philadelphia
 villarreal vs atlético madrid
@@ -20,7 +24,6 @@ crystal palace f.c. vs arsenal f.c. standings
 west ham vs leeds united f.c. standings
 livescore
 liverpool
-fotmob
 premier league standings
 valencia cf vs fc barcelona standings
 real madrid vs athletic club
@@ -95,6 +98,3 @@ pubg 4.4 update
 pubg
 myanmar ruby
 tottenham vs leeds
-ဖိလစ်ပိုင်
-hantavirus infections cruise ship
-myanma railways yangon mandalay upgrade
