@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import time
@@ -48,8 +49,9 @@ def run() -> int:
     if now - last >= UA_COOLDOWN_SEC or last == 0:
         tmp_ua = Path("/tmp/ip_sentinel_ua.txt")
         if _curl_download(ctx, f"{REPO_RAW_URL}/data/user_agents.txt", tmp_ua):
-            (data / "user_agents.txt").parent.mkdir(parents=True, exist_ok=True)
-            tmp_ua.replace(data / "user_agents.txt")
+            dest_ua = data / "user_agents.txt"
+            dest_ua.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(tmp_ua), str(dest_ua))
             ua_time_file.write_text(str(now), encoding="utf-8")
             _log("INFO ", "✅ 设备指纹池 (User-Agents) 30天错峰滚动更新成功")
         else:
@@ -62,8 +64,9 @@ def run() -> int:
     region = cfg.get("REGION_CODE", "US")
     tmp_kw = Path("/tmp/ip_sentinel_kw.txt")
     if _curl_download(ctx, f"{REPO_RAW_URL}/data/keywords/kw_{region}.txt", tmp_kw):
-        (data / "keywords").mkdir(parents=True, exist_ok=True)
-        tmp_kw.replace(data / "keywords" / f"kw_{region}.txt")
+        dest_kw = data / "keywords" / f"kw_{region}.txt"
+        dest_kw.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(tmp_kw), str(dest_kw))
         _log("INFO ", f"✅ 区域搜索词库 (kw_{region}) 每日同步成功")
     else:
         tmp_kw.unlink(missing_ok=True)
@@ -75,7 +78,7 @@ def run() -> int:
         rel = region_json.relative_to(install).as_posix()
         tmp_json = Path("/tmp/ip_sentinel_region.json")
         if _curl_download(ctx, f"{REPO_RAW_URL}/{rel}", tmp_json):
-            tmp_json.replace(region_json)
+            shutil.move(str(tmp_json), str(region_json))
             _log("INFO ", f"✅ 区域规则 ({rel}) 同步成功")
         else:
             tmp_json.unlink(missing_ok=True)

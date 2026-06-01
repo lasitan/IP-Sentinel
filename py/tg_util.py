@@ -91,7 +91,10 @@ def _parse_message_id(raw: str) -> int | None:
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
-    mid = (data.get("result") or {}).get("message_id")
+    result = data.get("result")
+    if not isinstance(result, dict):
+        return None
+    mid = result.get("message_id")
     return int(mid) if mid else None
 
 
