@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,30 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     cfg.setdefault("INSTALL_DIR", install_dir)
     cfg.setdefault("LOG_FILE", f"{install_dir}/logs/sentinel.log")
     return cfg
+
+
+def save_config_keys(updates: dict[str, str], path: str | None = None) -> None:
+    """原子更新 config.conf 中的键值（Agent 侧持久化 TOPIC_BOT_MESSAGE_ID 等）."""
+    cfg_path = path or default_config_path()
+    if not updates or not os.path.isfile(cfg_path):
+        return
+    with open(cfg_path, "r+", encoding="utf-8", errors="ignore") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        lines = f.readlines()
+        for key, val in updates.items():
+            prefix = f"{key}="
+            found = False
+            for i, line in enumerate(lines):
+                if line.startswith(prefix):
+                    lines[i] = f'{prefix}"{val}"\n'
+                    found = True
+                    break
+            if not found:
+                lines.append(f'{prefix}"{val}"\n')
+        f.seek(0)
+        f.writelines(lines)
+        f.truncate()
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def require_config(path: str | None = None) -> dict[str, Any]:

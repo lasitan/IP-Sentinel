@@ -230,7 +230,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         self._plain_response(503, f"503 Service Unavailable: {script} missing\n".encode())
 
     def _handle_log_async(self, cfg: dict[str, str], edit_msg_id: int | None = None) -> None:
-        """后台拉日志；话题模式编辑唯一 Bot 消息，不新发."""
+        """后台拉日志；话题模式删旧 Bot 消息后新发."""
         del edit_msg_id  # 统一使用 TOPIC_BOT_MESSAGE_ID
         try:
             install = cfg.get("INSTALL_DIR", INSTALL_DIR)
@@ -257,7 +257,7 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 return
             ok, err = tg_push(cfg, payload, timeout=15)
             if ok:
-                agent_log(cfg, "Webhook", "INFO ", "实时日志已更新至话题 Bot 消息")
+                agent_log(cfg, "Webhook", "INFO ", "实时日志已推送（删旧发新）")
             else:
                 agent_log(cfg, "Webhook", "WARN ", f"Telegram 日志更新失败: {err}")
         except Exception as exc:

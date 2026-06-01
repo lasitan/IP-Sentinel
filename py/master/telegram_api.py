@@ -104,6 +104,33 @@ class TelegramAPI:
             return None
         return (body.get("result") or {}).get("message_id")
 
+    def replace_message(
+        self,
+        chat_id: str,
+        old_message_id: int | None,
+        text: str,
+        *,
+        message_thread_id: int | None = None,
+    ) -> int | None:
+        """删旧消息后发送新消息，返回新 message_id."""
+        if old_message_id:
+            self.delete_message(chat_id, old_message_id, message_thread_id=message_thread_id)
+        return self.send_message(chat_id, text, message_thread_id=message_thread_id)
+
+    def replace_ui(
+        self,
+        chat_id: str,
+        old_message_id: int | None,
+        text: str,
+        keyboard: list,
+        *,
+        message_thread_id: int | None = None,
+    ) -> int | None:
+        """删旧消息后发送新 UI 消息，返回新 message_id."""
+        if old_message_id:
+            self.delete_message(chat_id, old_message_id, message_thread_id=message_thread_id)
+        return self.send_ui(chat_id, text, keyboard, message_thread_id=message_thread_id)
+
     def edit_message(
         self,
         chat_id: str,
@@ -112,14 +139,10 @@ class TelegramAPI:
         *,
         message_thread_id: int | None = None,
     ) -> bool:
-        payload: dict[str, Any] = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        }
-        self._with_thread(payload, message_thread_id)
-        return bool(self._post("editMessageText", payload).get("ok"))
+        new_id = self.replace_message(
+            chat_id, message_id, text, message_thread_id=message_thread_id
+        )
+        return new_id is not None
 
     def edit_ui(
         self,
@@ -130,15 +153,10 @@ class TelegramAPI:
         *,
         message_thread_id: int | None = None,
     ) -> bool:
-        payload: dict[str, Any] = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "reply_markup": {"inline_keyboard": keyboard},
-        }
-        self._with_thread(payload, message_thread_id)
-        return bool(self._post("editMessageText", payload).get("ok"))
+        new_id = self.replace_ui(
+            chat_id, message_id, text, keyboard, message_thread_id=message_thread_id
+        )
+        return new_id is not None
 
     def delete_message(
         self,

@@ -34,8 +34,6 @@ from master.security import (
 from master.telegram_api import TelegramAPI
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
-TOPIC_UI_MAX_EDITS = 200
-
 
 @dataclass
 class _TgCtx:
@@ -125,31 +123,16 @@ class MasterHandlers:
         *,
         on_manage: bool = False,
     ) -> None:
-        """话题内唯一 Master 消息：优先编辑，达上限或失败则删旧新发."""
+        """话题内唯一 Master 消息：删旧后发新."""
         thread = self._node_thread_id(owner, node)
         if not thread or not self.forum_chat_id:
             return
         dest = self.forum_chat_id
         kb = self._append_back_btn(keyboard, node, on_manage=on_manage)
-        ui_id, edits = self._get_topic_ui(owner, node)
-
-        def _fresh_send() -> None:
-            nonlocal ui_id
-            if ui_id:
-                self.tg.delete_message(dest, ui_id, message_thread_id=thread)
-            new_id = self.tg.send_ui(dest, text, kb, message_thread_id=thread)
-            if new_id:
-                ui_id = new_id
-                self._set_topic_ui(owner, node, new_id, 0)
-
-        if not ui_id or edits >= TOPIC_UI_MAX_EDITS:
-            _fresh_send()
-            return
-
-        if self.tg.edit_ui(dest, ui_id, text, kb, message_thread_id=thread):
-            self._set_topic_ui(owner, node, ui_id, edits + 1)
-        else:
-            _fresh_send()
+        ui_id, _ = self._get_topic_ui(owner, node)
+        new_id = self.tg.replace_ui(dest, ui_id, text, kb, message_thread_id=thread)
+        if new_id:
+            self._set_topic_ui(owner, node, new_id, 0)
         self._sync_agent_topic_bot(owner, node)
 
     def _sync_agent_topic_bot(self, owner: str, node: str) -> None:
@@ -174,12 +157,12 @@ class MasterHandlers:
         keyboard: list,
         msg_id: int | None = None,
     ) -> None:
-        """General 仅编辑当前 callback 消息；唯一 Bot 消息只在各节点话题内."""
+        """General：删旧 callback 消息后发新；节点话题仍走 _topic_present."""
         dest = self.forum_chat_id
         thread = self._ctx.thread
         mid = msg_id or self._ctx.msg_id
         if mid:
-            self.tg.edit_ui(dest, mid, text, keyboard, message_thread_id=thread)
+            self.tg.replace_ui(dest, mid, text, keyboard, message_thread_id=thread)
         else:
             self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
 
@@ -342,7 +325,9 @@ class MasterHandlers:
                 )
             return
         if self._can_edit_in_place(dest, thread):
-            self.tg.edit_ui(dest, self._ctx.msg_id, text, keyboard, message_thread_id=thread)
+            self.tg.replace_ui(
+                dest, self._ctx.msg_id, text, keyboard, message_thread_id=thread
+            )
             return
         self.tg.send_ui(dest, text, keyboard, message_thread_id=thread)
 
@@ -362,7 +347,7 @@ class MasterHandlers:
             self._topic_present(owner_chat_id, node, text, kb)
             return
         if self._can_edit_in_place(dest, thread):
-            self.tg.edit_message(
+            self.tg.replace_message(
                 dest, self._ctx.msg_id, text, message_thread_id=thread
             )
             return
@@ -1365,14 +1350,11 @@ class MasterHandlers:
         thread = self._node_thread_id(chat_id, node)
         ui_id, _ = self._get_topic_ui(chat_id, node)
         if thread and ui_id and self.forum_chat_id:
-            self.tg.edit_message(
+            self.tg.replace_message(
                 self.forum_chat_id,
                 ui_id,
                 f"🗑️ 已删除节点 `{node}` 及其历史记录。",
                 message_thread_id=thread,
-            )
-            self.tg.edit_reply_markup(
-                self.forum_chat_id, ui_id, [], message_thread_id=thread
             )
         self.db.execute("DELETE FROM nodes WHERE chat_id=? AND node_name=?", (chat_id, node))
         self.db.execute("DELETE FROM ip_trend_log WHERE node_name=?", (node,))
