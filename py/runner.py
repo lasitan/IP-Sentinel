@@ -72,23 +72,16 @@ def run() -> int:
         return 0
 
     try:
-        if sys.stdout.isatty():
-            log(cfg, "SYSTEM", "INFO ", "💻 检测到人工终端干预，跳过静默休眠，立即执行任务！")
+        manual = os.environ.get("IP_SENTINEL_MANUAL_RUN", "").lower() in ("1", "true", "yes")
+        if sys.stdout.isatty() or manual:
+            reason = "Master 手动触发" if manual else "人工终端"
+            log(cfg, "SYSTEM", "INFO ", f"💻 {reason}，跳过静默休眠，立即执行任务！")
         else:
             jitter = random.randint(0, 179)
             log(cfg, "SYSTEM", "INFO ", f"⏱️ 主控引擎由后台唤醒，进入防并发随机休眠状态: {jitter} 秒...")
             time.sleep(jitter)
 
         log(cfg, "SYSTEM", "INFO", "休眠结束，开始计算本轮任务轮盘...")
-        busy, holder = maintenance_busy()
-        if busy:
-            log(
-                cfg,
-                "SYSTEM",
-                "INFO",
-                f"已有维护任务运行中 (pid={holder})，跳过本轮定时调度。",
-            )
-            return 0
         picked = _pick_module(cfg)
         if not picked:
             log(cfg, "SYSTEM", "WARN", "未启用任何维护模块，跳过本轮。")
@@ -98,6 +91,16 @@ def run() -> int:
         if not resolve_py_script(script_name, cfg):
             log(cfg, "SYSTEM", "ERROR", f"配置了模块 {mod_name}，但未找到: {script_name}")
             return 1
+
+        busy, holder = maintenance_busy()
+        if busy:
+            log(
+                cfg,
+                "SYSTEM",
+                "INFO",
+                f"已有维护任务运行中 (pid={holder})，跳过本轮 [{mod_name}]。",
+            )
+            return 0
 
         log(cfg, "SYSTEM", "INFO", f"命中触发条件，加载并执行子模块: {mod_name}")
         if not spawn_py_script(script_name, log_module="SYSTEM", nice=True):

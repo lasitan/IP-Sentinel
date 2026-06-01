@@ -124,7 +124,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
             USED_SIGNS[req_sign] = time.time()
 
         if req_path == "/trigger_run":
-            self._dispatch_spawn("runner.py", "立即巡逻 (/trigger_run)")
+            self._dispatch_spawn(
+                "runner.py",
+                "立即巡逻 (/trigger_run)",
+                extra_env={"IP_SENTINEL_MANUAL_RUN": "1"},
+            )
             return
 
         if req_path == "/trigger_google":
@@ -196,10 +200,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
         action_label: str,
         *,
         log_received: bool = True,
+        extra_env: dict[str, str] | None = None,
     ) -> None:
         if log_received:
             self._webhook_log("INFO ", f"收到 Master 指令: {action_label}")
-        if spawn_py_script(script, log_module="Webhook"):
+        if spawn_py_script(script, log_module="Webhook", extra_env=extra_env):
             self._ok(f"Action Accepted: {script}\n".encode())
         else:
             self._service_unavailable(script)

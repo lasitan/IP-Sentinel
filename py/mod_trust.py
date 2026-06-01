@@ -152,7 +152,17 @@ def _run_locked(cfg: dict) -> int:
 
 
 def main() -> None:
-    sys.exit(run())
+    try:
+        sys.exit(run())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        try:
+            cfg = require_config()
+            log_trust(cfg, "ERROR", f"信用净化未捕获异常: {exc}")
+        except SystemExit:
+            print(f"[Trust] FATAL: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
