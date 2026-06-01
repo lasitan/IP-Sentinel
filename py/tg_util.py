@@ -160,7 +160,8 @@ def tg_delete(
 
 def tg_push(cfg: dict[str, object], payload: dict[str, object], *, timeout: int = 30) -> tuple[bool, str]:
     """
-    统一推送：话题模式删旧 Bot 消息后新发，并更新 TOPIC_BOT_MESSAGE_ID。
+    统一推送：话题模式先发新消息，成功后再删旧 Bot 消息，并更新 TOPIC_BOT_MESSAGE_ID。
+    先发后删确保发送失败时旧消息保留，不留空白。
     非话题模式走 sendMessage。
     """
     api_url = str(cfg.get("TG_API_URL") or "")
@@ -172,15 +173,16 @@ def tg_push(cfg: dict[str, object], payload: dict[str, object], *, timeout: int 
     bot_msg_id = tg_topic_bot_id(cfg)
 
     if thread:
-        if bot_msg_id:
-            tg_delete(api_url, chat, bot_msg_id, thread, timeout=timeout)
         body["chat_id"] = chat
         body.pop("message_id", None)
         apply_thread(body, thread)
         ok, err, new_id = tg_post(api_url, body, timeout=timeout)
-        if ok and new_id:
-            save_config_keys({"TOPIC_BOT_MESSAGE_ID": str(new_id)})
-            cfg["TOPIC_BOT_MESSAGE_ID"] = str(new_id)
+        if ok:
+            if bot_msg_id:
+                tg_delete(api_url, chat, bot_msg_id, thread, timeout=timeout)
+            if new_id:
+                save_config_keys({"TOPIC_BOT_MESSAGE_ID": str(new_id)})
+                cfg["TOPIC_BOT_MESSAGE_ID"] = str(new_id)
         return ok, err
 
     body["chat_id"] = chat

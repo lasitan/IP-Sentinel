@@ -1588,15 +1588,13 @@ class MasterHandlers:
             self.tg.send_message(chat_id, result)
 
     def _cmd_log_refresh(self, chat_id: str, node: str, msg_id: int | None, auth: str) -> None:
-        """刷新日志：Agent 编辑话题内唯一 Bot 消息."""
+        """刷新日志：Agent 直接删旧发新，无需 Master 预占位。"""
         node = sanitize_node_name(node)
         info = self._agent_row(chat_id, node)
         if not info:
             self._msg_node(chat_id, node, "❌ 数据库中未找到该节点的通讯地址。")
             return
         ip, port = info
-        if self._in_topic_flow(chat_id, node):
-            self._msg_node(chat_id, node, "⏳ 正在刷新日志…")
         url = generate_signed_url(auth, ip, port, "/trigger_log")
         resp = call_agent(url)
         if resp == "FAILED":
@@ -1616,14 +1614,18 @@ class MasterHandlers:
             self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
             return
         ip, port = info
-        wait = f"⏳ 正在向 `{node}` ({info[0]}) 下发 [{action}] 指令，请稍候..."
-        if action == "log":
-            if self.forum_mode and self._node_thread_id(chat_id, node):
+        # log / report / quality：Agent 异步推送结果到话题，Master 不占位，避免 "⏳" 永久卡住
+        _agent_async = action in ("log", "report", "quality")
+        _in_topic = self.forum_mode and bool(self._node_thread_id(chat_id, node))
+        if not _agent_async or not _in_topic:
+            wait = f"⏳ 正在向 `{node}` ({info[0]}) 下发 [{action}] 指令，请稍候..."
+            if action != "log":
                 self._msg_node(chat_id, node, wait)
-        else:
-            self._msg_node(chat_id, node, wait)
         url = generate_signed_url(auth, ip, port, f"/trigger_{action}")
         resp = call_agent(url)
         result = self._format_agent_resp(resp, node, action)
-        if action != "log":
-            self._msg_node(chat_id, node, result, markdown=False if result.startswith("❌") else True)
+        # 错误直接回显；成功且 Agent 异步处理的动作不再二次 msg_node
+        if result.startswith("❌") or result.startswith("⚠️"):
+            self._msg_node(chat_id, node, result, markdown=False)
+        elif not _agent_async:
+            self._msg_node(chat_id, node, result)
