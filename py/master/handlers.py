@@ -947,14 +947,26 @@ class MasterHandlers:
             self.tg.send_ui(dest, msg, kb, message_thread_id=thread)
 
     def _remote_version(self) -> str:
-        try:
-            req = urllib.request.Request(f"{REPO_RAW_URL}/version.txt", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                for line in resp.read().decode().splitlines():
-                    if line.startswith("MASTER_VERSION="):
-                        return line.split("=", 1)[1].strip().strip('"')
-        except (OSError, urllib.error.URLError):
-            pass
+        """拉取 GitHub 最新 MASTER_VERSION，带重试与缓存（60 秒内复用）."""
+        import time as _time
+        cache = getattr(self, "_remote_ver_cache", ("", 0.0))
+        if cache[0] and _time.monotonic() - cache[1] < 60:
+            return cache[0]
+        url = f"{REPO_RAW_URL}/version.txt"
+        headers = {"User-Agent": "IP-Sentinel-Master/1.0", "Cache-Control": "no-cache"}
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    for line in resp.read().decode().splitlines():
+                        if line.startswith("MASTER_VERSION="):
+                            ver = line.split("=", 1)[1].strip().strip('"')
+                            self._remote_ver_cache = (ver, _time.monotonic())
+                            return ver
+            except (OSError, urllib.error.URLError, TimeoutError):
+                if attempt < 2:
+                    import time as _t
+                    _t.sleep(1)
         return ""
 
     def _cmd_all_ota_confirm(self, chat_id: str, msg_id: int | None = None) -> None:

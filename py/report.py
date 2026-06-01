@@ -102,17 +102,19 @@ def _fetch_isp(cfg: dict, ctx) -> str:
 
 
 def _remote_agent_version() -> str:
-    try:
-        req = urllib.request.Request(
-            f"{REPO_RAW_URL}/version.txt",
-            headers={"User-Agent": "IP-Sentinel-Agent"},
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            for line in resp.read().decode().splitlines():
-                if line.startswith("AGENT_VERSION="):
-                    return line.split("=", 1)[1].strip().strip('"')
-    except (urllib.error.URLError, TimeoutError, OSError):
-        pass
+    """拉取 GitHub 最新 AGENT_VERSION，最多重试 3 次。"""
+    url = f"{REPO_RAW_URL}/version.txt"
+    headers = {"User-Agent": "IP-Sentinel-Agent/1.0", "Cache-Control": "no-cache"}
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                for line in resp.read().decode().splitlines():
+                    if line.startswith("AGENT_VERSION="):
+                        return line.split("=", 1)[1].strip().strip('"')
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if attempt < 2:
+                time.sleep(1)
     return ""
 
 
