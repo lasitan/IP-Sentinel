@@ -756,7 +756,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o
 
 TMP_PY="${SECURE_TMP}/py_update"
 mkdir -p "$TMP_PY"
-PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py task_lock.py session_stats.py network.py persona.py geo_probe.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py"
+PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py task_lock.py session_stats.py network.py persona.py geo_probe.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py scheduler.py"
 for PY_FILE in $PY_FILES; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/${PY_FILE}" -o "${TMP_PY}/${PY_FILE}"
 done
@@ -768,6 +768,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/.python-version" -o "
 # 校验下载文件完整性，失败则不覆盖现有安装
 if [ ! -s "$TMP_UNINSTALL" ] || [ ! -s "${TMP_PY}/runner.py" ] || \
    [ ! -s "${TMP_PY}/webhook.py" ] || [ ! -s "${TMP_PY}/agent_daemon.py" ] || \
+   [ ! -s "${TMP_PY}/scheduler.py" ] || \
    [ ! -s "${TMP_PY}/ip_quality_probe.py" ] || [ ! -s "${TMP_PY}/mod_quality.py" ] || \
    [ ! -s "${TMP_PY}/tg_util.py" ] || \
    [ ! -s "${SECURE_TMP}/pyproject.toml" ] || [ ! -s "${SECURE_TMP}/uv.lock" ]; then
@@ -850,99 +851,20 @@ deploy_cron_task_wrapper || true
 DEPLOY_UTC_HOUR=$(date -u +%H)
 DEPLOY_UTC_MIN=$(date -u +%M)
 
+# 将 updater 触发时刻写入配置（供内置调度器使用），升级时跳过已存在的值
+if ! grep -q "^UPDATER_UTC_HOUR=" "$CONFIG_FILE"; then
+    echo "UPDATER_UTC_HOUR=\"${DEPLOY_UTC_HOUR}\"" >> "$CONFIG_FILE"
+fi
+if ! grep -q "^UPDATER_UTC_MIN=" "$CONFIG_FILE"; then
+    echo "UPDATER_UTC_MIN=\"${DEPLOY_UTC_MIN}\"" >> "$CONFIG_FILE"
+fi
+
 echo $(date -u +%s) > "${INSTALL_DIR}/core/.ua_last_update"
 
 if is_systemd; then
     echo "💡 检测到 Systemd 环境，正在部署原生守护服务..."
-    
-    cat > /etc/systemd/system/ip-sentinel-runner.service << EOF
-[Unit]
-Description=IP-Sentinel Runner Service
-After=network.target
-[Service]
-Environment="PATH=${UV_PATH}"
-Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
-Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
-SyslogIdentifier=ip-sentinel
-Type=oneshot
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${CRON_TASK} py/runner.py
-User=root
-CPUSchedulingPolicy=idle
-IOSchedulingClass=idle
-EOF
-
-    cat > /etc/systemd/system/ip-sentinel-runner.timer << EOF
-[Unit]
-Description=Timer for IP-Sentinel Runner Service
-[Timer]
-OnCalendar=*:0/20
-RandomizedDelaySec=180
-Persistent=true
-Unit=ip-sentinel-runner.service
-[Install]
-WantedBy=timers.target
-EOF
-
-    cat > /etc/systemd/system/ip-sentinel-updater.service << EOF
-[Unit]
-Description=IP-Sentinel Updater Service
-After=network.target
-[Service]
-Environment="PATH=${UV_PATH}"
-Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
-Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
-SyslogIdentifier=ip-sentinel
-Type=oneshot
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${CRON_TASK} py/updater.py
-User=root
-CPUSchedulingPolicy=idle
-IOSchedulingClass=idle
-EOF
-
-    cat > /etc/systemd/system/ip-sentinel-updater.timer << EOF
-[Unit]
-Description=Timer for IP-Sentinel Updater Service
-[Timer]
-OnCalendar=*-*-* ${DEPLOY_UTC_HOUR}:${DEPLOY_UTC_MIN}:00 UTC
-Persistent=true
-Unit=ip-sentinel-updater.service
-[Install]
-WantedBy=timers.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable --now ip-sentinel-runner.timer ip-sentinel-updater.timer
 
     if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
-        cat > /etc/systemd/system/ip-sentinel-report.service << EOF
-[Unit]
-Description=IP-Sentinel Telegram Report Service
-After=network.target
-[Service]
-Environment="PATH=${UV_PATH}"
-Environment="IP_SENTINEL_INSTALL_DIR=${INSTALL_DIR}"
-Environment="IP_SENTINEL_CONFIG=${INSTALL_DIR}/config.conf"
-SyslogIdentifier=ip-sentinel
-Type=oneshot
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${CRON_TASK} py/report.py
-User=root
-CPUSchedulingPolicy=idle
-IOSchedulingClass=idle
-EOF
-
-        cat > /etc/systemd/system/ip-sentinel-report.timer << EOF
-[Unit]
-Description=Timer for IP-Sentinel Telegram Report Service
-[Timer]
-OnCalendar=*-*-* 16:00:00 UTC
-Unit=ip-sentinel-report.service
-[Install]
-WantedBy=timers.target
-EOF
-
         cat > /etc/systemd/system/ip-sentinel-agent-daemon.service << EOF
 [Unit]
 Description=IP-Sentinel Agent Daemon Service
@@ -966,55 +888,24 @@ EOF
 
         DAEMON_IP=$( (curl -s -m 5 api.ip.sb/ip || curl -s -m 5 ifconfig.me) 2>/dev/null | tr -d '[:space:]' )
         [ -n "$DAEMON_IP" ] && echo "$DAEMON_IP" > "${INSTALL_DIR}/core/.last_ip" || echo "$(echo "$SAFE_PUBLIC_IP" | tr -d '[]')" > "${INSTALL_DIR}/core/.last_ip"
-        
+
         systemctl daemon-reload
-        systemctl enable --now ip-sentinel-report.timer
         systemctl enable --now ip-sentinel-agent-daemon.service
     fi
     else
-        echo "💡 未检测到 Systemd，正在配置备用调度器 (兼容 Alpine/OpenRC)..."
-        
-        IS_RESTRICTED_ALPINE="false"
-        if [ -f /etc/alpine-release ]; then
-            if [ -d /proc/vz ] || grep -qa container=lxc /proc/1/environ 2>/dev/null || [ -f /.dockerenv ]; then
-                IS_RESTRICTED_ALPINE="true"
-            fi
-        fi
+        echo "💡 未检测到 Systemd，正在配置看门狗调度器 (兼容 Alpine/OpenRC)..."
 
-        if [ "$IS_RESTRICTED_ALPINE" == "true" ]; then
-            echo -e "⚠️ 探测到受限的 LXC/OpenVZ Alpine 环境，系统自带 Cron 极易假死。"
-            echo -e "🔧 启用内置循环调度脚本 (Alpine 受限环境)..."
-            
-            rc-update del crond default >/dev/null 2>&1 || true
-            rc-service crond stop >/dev/null 2>&1 || true
-            pkill -9 crond >/dev/null 2>&1 || true
-            crontab -l 2>/dev/null | grep -v "ip_sentinel" > "${SECURE_TMP}/cron_clean" || true
-            [ -f "${SECURE_TMP}/cron_clean" ] && crontab "${SECURE_TMP}/cron_clean" >/dev/null 2>&1
-            rm -f "${SECURE_TMP}/cron_clean"
-
+        if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
+            # 看门狗脚本：仅负责确保 agent_daemon 持续运行
+            # 任务调度（runner/updater/report）由 agent_daemon 内置调度器接管
             cat > ${INSTALL_DIR}/core/sentinel_scheduler.sh << EOF
 #!/bin/bash
-# Alpine 受限环境：每 20 分钟 runner，避免仅匹配 00/20/40 分漏跑
+# IP-Sentinel Agent 看门狗（内置调度器模式）
 INSTALL_DIR="${INSTALL_DIR}"
-CRON_TASK="${CRON_TASK}"
 UV_BIN="${UV_BIN}"
-LAST_RUNNER=0
 while true; do
-    NOW=\$(date +%s)
-    if [ \$((NOW - LAST_RUNNER)) -ge 1200 ]; then
-        "\$CRON_TASK" py/runner.py
-        LAST_RUNNER=\$NOW
-    fi
-    MIN=\$(date -u +%M)
-    HOUR=\$(date -u +%H)
-    if [ "\$HOUR" == "${DEPLOY_UTC_HOUR}" ] && [ "\$MIN" == "${DEPLOY_UTC_MIN}" ]; then
-        "\$CRON_TASK" py/updater.py
-    fi
-    if [ "\$HOUR" == "16" ] && [ "\$MIN" == "00" ]; then
-        "\$CRON_TASK" py/report.py
-    fi
-    if ! pgrep -f 'ip_sentinel/py/webhook.py' >/dev/null && ! pgrep -f 'webhook.py' >/dev/null; then
-        ${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &
+    if ! pgrep -f 'webhook.py' >/dev/null && ! pgrep -f 'agent_daemon.py' >/dev/null; then
+        nohup \${UV_BIN} run --directory \${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &
     fi
     sleep 60
 done
@@ -1028,49 +919,11 @@ EOF
             else
                 grep -q "sentinel_scheduler" /etc/profile || echo "nohup bash ${INSTALL_DIR}/core/sentinel_scheduler.sh >/dev/null 2>&1 &" >> /etc/profile
             fi
-            
+
             [ -n "$PUBLIC_IP" ] && echo "$PUBLIC_IP" > "${INSTALL_DIR}/core/.last_ip"
+            pkill -f sentinel_scheduler.sh 2>/dev/null || true
             nohup bash ${INSTALL_DIR}/core/sentinel_scheduler.sh >/dev/null 2>&1 &
-            
-        else
-            crontab -l 2>/dev/null | grep -v "ip_sentinel" > "${SECURE_TMP}/cron_backup" || true
-            echo "*/20 * * * * ${CRON_TASK} py/runner.py" >> "${SECURE_TMP}/cron_backup"
-            echo "${DEPLOY_UTC_MIN} ${DEPLOY_UTC_HOUR} * * * ${CRON_TASK} py/updater.py" >> "${SECURE_TMP}/cron_backup"
-            
-            if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
-                echo "0 16 * * * ${CRON_TASK} py/report.py" >> "${SECURE_TMP}/cron_backup"
-                echo "$SAFE_PUBLIC_IP" > "${INSTALL_DIR}/core/.last_ip"
-                DAEMON_IP=$( (curl -s -m 5 api.ip.sb/ip || curl -s -m 5 ifconfig.me) 2>/dev/null | tr -d '[:space:]' )
-                [ -n "$DAEMON_IP" ] && echo "$DAEMON_IP" > "${INSTALL_DIR}/core/.last_ip" || echo "$(echo "$SAFE_PUBLIC_IP" | tr -d '[]')" > "${INSTALL_DIR}/core/.last_ip"
-                
-                if command -v rc-update >/dev/null 2>&1 && [ -d "/etc/local.d" ]; then
-                    echo "nohup ${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &" > /etc/local.d/ip_sentinel.start
-                    chmod +x /etc/local.d/ip_sentinel.start
-                    rc-update add local default >/dev/null 2>&1
-                else
-                    echo "@reboot nohup ${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &" >> "${SECURE_TMP}/cron_backup"
-                fi
-                
-                echo "* * * * * pgrep -f 'ip_sentinel/py/webhook.py' >/dev/null || pgrep -f 'webhook.py' >/dev/null || nohup ${UV_BIN} run --directory ${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &" >> "${SECURE_TMP}/cron_backup"
-                
-                nohup ${UV_BIN} run --directory "${INSTALL_DIR}" python py/agent_daemon.py >/dev/null 2>&1 &
-            fi
-            
-            [ -f "${SECURE_TMP}/cron_backup" ] && crontab "${SECURE_TMP}/cron_backup" >/dev/null 2>&1
-            
-            if [ -d "/etc/crontabs" ] && [ -f "/var/spool/cron/crontabs/root" ]; then
-                cp -f /var/spool/cron/crontabs/root /etc/crontabs/root 2>/dev/null || true
-                chmod 600 /etc/crontabs/root 2>/dev/null || true
-            fi
-            
-            if command -v rc-service >/dev/null 2>&1; then
-                rc-service crond restart >/dev/null 2>&1 || crond -b >/dev/null 2>&1
-            else
-                pkill -9 crond 2>/dev/null || true
-                crond -b >/dev/null 2>&1 || true
-            fi
-            
-            rm -f "${SECURE_TMP}/cron_backup"
+            nohup ${UV_BIN} run --directory "${INSTALL_DIR}" python py/agent_daemon.py >/dev/null 2>&1 &
         fi
     fi
 
