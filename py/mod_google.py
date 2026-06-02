@@ -32,14 +32,14 @@ MODULE = "Google"
 
 # 单次纠偏预算：避免 Playwright 占锁过久阻塞定时任务与质量统计
 _SESSION_BUDGET_SEC = 360
-_ACTIONS_MIN = 2
-_ACTIONS_MAX = 3
+_ACTIONS_MIN = 4
+_ACTIONS_MAX = 6
 _SLEEP_MIN = 8
 _SLEEP_MAX = 18
 _MAPS_DWELL_SEC = 12
 _EARTH_DWELL_SEC = 18
-_MAX_MAPS_BROWSER = 1
-_MAX_EARTH_BROWSER = 1
+_MAX_MAPS_BROWSER = 3   # Maps 浏览器偏移次数上限；每次 Maps 偏移成功后立即跟一次 Earth 偏移
+_MAX_EARTH_BROWSER = 3  # Earth 跟随 Maps，两者次数保持一致
 
 
 def run(cfg: dict | None = None) -> int:
@@ -138,7 +138,7 @@ def _run_locked(cfg: dict) -> int:
         MODULE,
         "INFO ",
         f"会话预算: {_SESSION_BUDGET_SEC}s | 动作 {total_actions} 次 | "
-        f"浏览器 Maps≤{maps_browser_left} Earth≤{earth_browser_left}",
+        f"Maps 偏移≤{maps_browser_left} 次 (Earth 跟随)",
     )
 
     for i in range(1, total_actions + 1):
@@ -149,6 +149,15 @@ def _run_locked(cfg: dict) -> int:
                 MODULE,
                 "WARN ",
                 f"已达会话时间上限 ({int(elapsed)}s)，提前结束动作循环。",
+            )
+            break
+
+        if maps_geo_visits >= _MAX_MAPS_BROWSER:
+            log(
+                cfg,
+                MODULE,
+                "INFO ",
+                f"已完成 {_MAX_MAPS_BROWSER} 次 Maps+Earth 偏移对，结束本次任务。",
             )
             break
 
@@ -196,6 +205,10 @@ def _run_locked(cfg: dict) -> int:
                 if geo_result == "ok":
                     code = 200
                     maps_geo_visits += 1
+                    # Earth 跟随 Maps：立即以相同坐标执行 Earth 偏移
+                    if earth_browser_left > 0:
+                        earth_browser_left -= 1
+                        _run_earth_geo(action_lat, action_lon, f"跟随 Maps 第 {maps_geo_visits} 次")
                 else:
                     log(cfg, MODULE, "WARN ", f"Maps 浏览器访问失败 ({geo_result})，回退为 HTTP。")
             else:
@@ -203,11 +216,8 @@ def _run_locked(cfg: dict) -> int:
 
             if code != 200 and maps_geo_mode == "auto":
                 code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
-        elif action_type == 5 and earth_browser_left > 0 and maps_geo_mode in ("true", "auto"):
-            earth_browser_left -= 1
-            url = "https://earth.google.com/"
-            code = _run_earth_geo(session_lat, session_lon, f"探索地球 [{i}/{total_actions}]")
         elif action_type == 5:
+            # Earth 不再独立触发浏览器偏移（已跟随 Maps），此处仅保留 HTTP 探测
             url = "https://earth.google.com/"
             code = http_status(url, ctx, ua=session_ua, follow=True, timeout=15)
         else:
@@ -221,6 +231,15 @@ def _run_locked(cfg: dict) -> int:
             "EXEC ",
             f"动作[{i}/{total_actions}]完成 | HTTP状态: {code} | 抖动坐标: {action_lat}, {action_lon}",
         )
+
+        if maps_geo_visits >= _MAX_MAPS_BROWSER:
+            log(
+                cfg,
+                MODULE,
+                "INFO ",
+                f"已完成 {_MAX_MAPS_BROWSER} 次 Maps+Earth 偏移对，立即进入自检。",
+            )
+            break
 
         if i < total_actions and time.monotonic() - session_start < _SESSION_BUDGET_SEC:
             sleep_time = random.randint(_SLEEP_MIN, _SLEEP_MAX)

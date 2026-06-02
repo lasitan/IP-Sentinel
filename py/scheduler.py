@@ -5,10 +5,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
-import shutil
-import subprocess
 import threading
-from pathlib import Path
 
 from agent_spawn import spawn_py_script
 from config import load_config, save_config_keys
@@ -24,78 +21,6 @@ def _now_utc() -> datetime.datetime:
 
 def _slog(cfg: dict, level: str, msg: str) -> None:
     log(cfg, "Sched", level, msg)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MIGRATE v4.5.7 — 清理旧 systemd timer 单元与 cron 条目
-# 下一版本更新时删除以下整块迁移代码（_migrate_* 函数和 run_migration 函数）
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _migrate_remove_legacy_systemd() -> None:
-    """停用并删除旧 systemd timer/service 单元."""
-    if not shutil.which("systemctl"):
-        return
-
-    old_units = [
-        "ip-sentinel-runner.timer",
-        "ip-sentinel-runner.service",
-        "ip-sentinel-updater.timer",
-        "ip-sentinel-updater.service",
-        "ip-sentinel-report.timer",
-        "ip-sentinel-report.service",
-    ]
-    any_removed = False
-    for unit in old_units:
-        subprocess.run(
-            ["systemctl", "disable", "--now", unit],
-            capture_output=True,
-            check=False,
-        )
-        unit_path = Path(f"/etc/systemd/system/{unit}")
-        if unit_path.exists():
-            unit_path.unlink(missing_ok=True)
-            any_removed = True
-
-    if any_removed:
-        subprocess.run(["systemctl", "daemon-reload"], capture_output=True, check=False)
-
-
-def _migrate_remove_legacy_cron() -> None:
-    """清除 crontab 中旧 runner/updater/report/cron_task 条目."""
-    try:
-        result = subprocess.run(
-            ["crontab", "-l"], capture_output=True, text=True, check=False
-        )
-        lines = result.stdout.splitlines()
-        keep = [
-            ln
-            for ln in lines
-            if "runner.py" not in ln
-            and "updater.py" not in ln
-            and "report.py" not in ln
-            and "cron_task.sh" not in ln
-        ]
-        if len(keep) < len(lines):
-            new_cron = "\n".join(keep) + ("\n" if keep else "")
-            subprocess.run(
-                ["crontab", "-"],
-                input=new_cron,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-
-def run_migration() -> None:
-    """执行一次性迁移：移除旧外部调度守护。下一版本删除此函数."""
-    _migrate_remove_legacy_systemd()
-    _migrate_remove_legacy_cron()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 迁移代码结束
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def _resolve_updater_time(cfg: dict) -> tuple[int, int]:
@@ -176,8 +101,7 @@ class InternalScheduler:
 
 
 def start_scheduler() -> InternalScheduler:
-    """执行迁移并启动内置调度器，返回调度器实例."""
-    run_migration()
+    """启动内置调度器，返回调度器实例."""
     sched = InternalScheduler()
     sched.start()
     return sched
