@@ -1,3 +1,4 @@
+np news
 chatgpt
 calculator
 myanmar
@@ -52,7 +53,6 @@ chelsea
 bournemouth vs man city
 အာဆင်နယ် နှင့် ဘန်လေ
 arsenal vs burnley
-np news
 ငလျင်
 earthquake near me
 earthquake
