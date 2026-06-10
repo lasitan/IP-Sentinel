@@ -120,6 +120,7 @@ def record_google_session(
     conclusion: str,
     maps_visits: int,
     earth_visits: int,
+    search_loc_visits: int = 0,
     actions_done: int,
     jump_gl: str = "",
     yt_premium_gl: str = "",
@@ -133,6 +134,7 @@ def record_google_session(
             "conclusion": conclusion,
             "maps_visits": maps_visits,
             "earth_visits": earth_visits,
+            "search_loc_visits": search_loc_visits,
             "actions_done": actions_done,
             "jump_gl": jump_gl,
             "yt_premium_gl": yt_premium_gl,
@@ -194,6 +196,7 @@ def summarize_google(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     warn = sum(1 for r in rows if r.get("outcome") == "warn")
     maps_geo = sum(int(r.get("maps_visits") or 0) for r in rows)
     earth_geo = sum(int(r.get("earth_visits") or 0) for r in rows)
+    search_loc = sum(int(r.get("search_loc_visits") or 0) for r in rows)
     rate = f"{(ok / total * 100):.1f}" if total else "0.0"
     return {
         "total": total,
@@ -202,6 +205,7 @@ def summarize_google(sessions: list[dict[str, Any]]) -> dict[str, Any]:
         "warn": warn,
         "maps_geo": maps_geo,
         "earth_geo": earth_geo,
+        "search_loc": search_loc,
         "rate": rate,
     }
 

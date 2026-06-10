@@ -549,7 +549,7 @@ class MasterHandlers:
         path: str,
         *,
         filter_ota: bool = False,
-        delay: float = 0.2,
+        delay: float = 0.0,  # 并发模式下不再使用，保留参数保持兼容
     ) -> None:
         sql = "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=?"
         params: tuple = (chat_id,)
@@ -558,48 +558,46 @@ class MasterHandlers:
         rows = self.db.execute(sql, params)
         auth = self._auth_key(chat_id)
 
-        def _worker() -> None:
-            for row in rows:
-                url = generate_signed_url(auth, row["agent_ip"], row["agent_port"], path)
-                call_agent(url)
-                time.sleep(delay)
+        def _call_one(row: dict) -> None:
+            url = generate_signed_url(auth, row["agent_ip"], row["agent_port"], path)
+            call_agent(url)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        for row in rows:
+            threading.Thread(target=_call_one, args=(row,), daemon=True).start()
 
     def _fanout_reports(self, chat_id: str) -> None:
-        """全部报告：预写各节点话题单消息并同步 Agent 后再触发 report."""
+        """全部报告：每节点独立线程并发下发，预写话题消息后立即触发 report."""
         rows = self.db.execute(
             "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=?",
             (chat_id,),
         )
         auth = self._auth_key(chat_id)
 
-        def _worker() -> None:
-            for row in rows:
-                node = row["node_name"]
-                if self.forum_mode and self._node_thread_id(chat_id, node):
-                    alias = (
-                        self.db.scalar(
-                            "SELECT COALESCE(node_alias, node_name) FROM nodes WHERE chat_id=? AND node_name=?",
-                            (chat_id, node),
-                        )
-                        or node
+        def _call_one(row: dict) -> None:
+            node = row["node_name"]
+            if self.forum_mode and self._node_thread_id(chat_id, node):
+                alias = (
+                    self.db.scalar(
+                        "SELECT COALESCE(node_alias, node_name) FROM nodes WHERE chat_id=? AND node_name=?",
+                        (chat_id, node),
                     )
-                    kb = [[{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node}"}]]
-                    self._topic_present(
-                        chat_id,
-                        node,
-                        f"⏳ 正在生成 `{alias}` 报告…",
-                        kb,
-                    )
-                    self._push_topic_to_agent(chat_id, node, auth, sync=True)
-                url = generate_signed_url(
-                    auth, row["agent_ip"], row["agent_port"], "/trigger_report"
+                    or node
                 )
-                call_agent(url)
-                time.sleep(2.0)
+                kb = [[{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node}"}]]
+                self._topic_present(
+                    chat_id,
+                    node,
+                    f"⏳ 正在生成 `{alias}` 报告…",
+                    kb,
+                )
+                self._push_topic_to_agent(chat_id, node, auth, sync=True)
+            url = generate_signed_url(
+                auth, row["agent_ip"], row["agent_port"], "/trigger_report"
+            )
+            call_agent(url)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        for row in rows:
+            threading.Thread(target=_call_one, args=(row,), daemon=True).start()
 
     def handle_svq(
         self,
@@ -1116,10 +1114,7 @@ class MasterHandlers:
             )
             self._forum_menu(msg, back, msg_id)
         else:
-            msg = (
-                "📢 正在向全部节点请求报告…\n"
-                "*(为避免 Telegram 限流，将依次发送，请稍候)*"
-            )
+            msg = "📢 正在向全部节点并发下发报告请求，请稍候…"
             if self._ctx.chat == self.forum_chat_id:
                 self._forum_menu(msg, back, msg_id)
             else:

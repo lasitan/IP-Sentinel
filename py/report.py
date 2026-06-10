@@ -189,7 +189,7 @@ def run() -> int:
                 f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
                 f"🚀 执行总数: {g['total']} 次 (胜率: **{g['rate']}%**)\n"
                 f"✅ 成功: {g['ok']} | ❌ CN 判定: {g['fail']} | ⚠️ 警告: {g['warn']}\n"
-                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次"
+                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次 | Search: **{g['search_loc']}** 次"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":

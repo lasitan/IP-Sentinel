@@ -300,6 +300,7 @@ def _run_locked(cfg: dict) -> int:
         conclusion=status,
         maps_visits=maps_geo_visits,
         earth_visits=earth_geo_visits,
+        search_loc_visits=search_loc_visits,
         actions_done=actions_done,
         jump_gl=jump_gl,
         yt_premium_gl=yt_pr_gl,
