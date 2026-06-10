@@ -710,3 +710,171 @@ def visit_google_earth(
 def maps_geo_enabled(cfg: dict[str, Any]) -> str:
     """true | auto | false — true 失败不回退 HTTP；auto 失败回退；false 仅 HTTP"""
     return str(cfg.get("ENABLE_MAPS_GEO", "true")).strip().lower() or "true"
+
+
+# ── Google 搜索「更新位置信息」按钮（多语言标签） ─────────────────────────────
+_SEARCH_LOCATION_LABELS: tuple[str, ...] = (
+    # 中文（简繁）
+    "更新位置信息", "更新您的位置", "更新你的位置",
+    "使用您的位置", "使用您目前的位置", "使用你的位置",
+    "分享位置", "允许获取位置", "获取您的位置",
+    # English
+    "Update location", "Update your location", "Use your location",
+    "Use precise location", "Allow location", "Share location",
+    # Español
+    "Actualizar ubicación", "Actualizar la ubicación",
+    # Deutsch
+    "Standort aktualisieren", "Ihren Standort aktualisieren",
+    # 日本語
+    "位置情報を更新", "現在地を更新",
+    # 한국어
+    "위치 업데이트", "위치 정보 업데이트",
+    # Français
+    "Mettre à jour la position", "Actualiser ma position",
+    # Português
+    "Atualizar localização",
+)
+
+# ── 允许弹窗确认标签 ───────────────────────────────────────────────────────────
+_SEARCH_LOCATION_ALLOW_LABELS: tuple[str, ...] = (
+    "允许", "同意", "确定", "Allow", "Grant", "Yes", "Permitir", "Autoriser",
+)
+
+# ── 在搜索结果页查找并点击「更新位置信息」的 JavaScript ────────────────────────
+_SEARCH_LOCATION_CLICK_JS = """
+() => {
+  const LABELS = [
+    '更新位置信息','更新您的位置','更新你的位置',
+    '使用您的位置','使用您目前的位置','使用你的位置',
+    '分享位置','允许获取位置','获取您的位置',
+    'update location','update your location','use your location',
+    'use precise location','allow location','share location',
+    'actualizar ubicación','standort aktualisieren',
+    '位置情報を更新','현在지를 업데이트','위치 업데이트',
+    'mettre à jour la position','atualizar localização',
+  ];
+  const norm = s => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+  const hit = text => LABELS.some(k => norm(text).includes(norm(k)));
+  const getTexts = el => [
+    el.textContent, el.getAttribute('aria-label'),
+    el.getAttribute('title'), el.getAttribute('data-value'),
+  ].filter(Boolean);
+  const tryClick = el => {
+    el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    for (const t of ['mouseover','mousedown','mouseup','click']) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));
+    }
+    if (typeof el.click === 'function') el.click();
+    return { ok: true, text: (getTexts(el)[0] || '').trim().slice(0, 80) };
+  };
+  const sel = 'a,button,span[jsaction],div[jsaction],[role="button"],[role="link"]';
+  for (const el of document.querySelectorAll(sel)) {
+    for (const txt of getTexts(el)) {
+      if (hit(txt)) return tryClick(el);
+    }
+  }
+  return { ok: false };
+}
+"""
+
+
+def _search_scroll_and_click_location(page: Page, _log: LogFn) -> bool:
+    """滚动搜索结果页至底部，找到并点击「更新位置信息」按钮，返回是否成功点击."""
+    # 分段滚动，让懒加载内容呈现
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    except Exception:
+        pass
+    page.wait_for_timeout(1500)
+
+    for step in (0.5, 0.8, 1.0):
+        page.evaluate(
+            f"() => window.scrollTo(0, document.body.scrollHeight * {step})"
+        )
+        page.wait_for_timeout(800)
+    page.wait_for_timeout(500)
+
+    # Playwright 原生定位（优先，可处理动态渲染元素）
+    for label in _SEARCH_LOCATION_LABELS:
+        for factory in (
+            lambda lb=label: page.get_by_text(lb, exact=False),
+            lambda lb=label: page.get_by_role("button", name=lb),
+            lambda lb=label: page.get_by_role("link", name=lb),
+        ):
+            try:
+                loc = factory().first
+                if loc.count() == 0:
+                    continue
+                if not loc.is_visible(timeout=1500):
+                    continue
+                loc.scroll_into_view_if_needed(timeout=3000)
+                loc.click(timeout=8_000)
+                _log("INFO ", f"[SEARCH_LOC] Playwright 已点击: {label!r}")
+                return True
+            except Exception:
+                continue
+
+    # JS fallback
+    result = page.evaluate(_SEARCH_LOCATION_CLICK_JS)
+    if isinstance(result, dict) and result.get("ok"):
+        _log("INFO ", f"[SEARCH_LOC] JS 已点击: {result.get('text', '?')}")
+        return True
+
+    _log("WARN ", "[SEARCH_LOC] 未找到「更新位置信息」类按钮")
+    return False
+
+
+def _search_handle_allow_dialog(page: Page, _log: LogFn) -> None:
+    """点击后等待 Google 弹出的「允许/同意」确认框，若有则点击."""
+    page.wait_for_timeout(1500)
+    for label in _SEARCH_LOCATION_ALLOW_LABELS:
+        try:
+            loc = page.get_by_role("button", name=label).first
+            if loc.count() > 0 and loc.is_visible(timeout=1200):
+                loc.click(timeout=5_000)
+                _log("INFO ", f"[SEARCH_LOC] 已确认位置授权弹窗: {label!r}")
+                return
+        except Exception:
+            continue
+    # 无弹窗属正常（权限已由 context.grant_permissions 预授）
+
+
+def visit_google_search_location(
+    *,
+    search_url: str,
+    latitude: float,
+    longitude: float,
+    user_agent: str,
+    locale: str = "en-US",
+    dwell_sec: int | None = None,
+    log: LogFn | None = None,
+) -> str:
+    """
+    打开 Google 搜索页，滚动到底部，点击「更新位置信息」按钮，
+    让 Google 通过 Geolocation API 读取注入的虚拟坐标。
+    """
+    def _l(level: str, msg: str) -> None:
+        if log:
+            log(level, msg)
+
+    def _on_loaded(page: Page) -> None:
+        _l("INFO ", "[SEARCH_LOC] 搜索页已加载，开始查找位置更新入口...")
+        clicked = _search_scroll_and_click_location(page, _l)
+        if clicked:
+            _search_handle_allow_dialog(page, _l)
+            page.wait_for_timeout(2000)
+            _log_geo_read(page, _l, "SEARCH_LOC")
+        else:
+            _log_geo_read(page, _l, "SEARCH_LOC")
+
+    return _visit_with_geolocation(
+        seed_url=search_url,
+        latitude=latitude,
+        longitude=longitude,
+        user_agent=user_agent,
+        locale=locale,
+        dwell_sec=dwell_sec,
+        log=log,
+        tag="SEARCH_LOC",
+        on_loaded=_on_loaded,
+    )

@@ -22,6 +22,7 @@ from maps_browser import (
     parse_lang_locale,
     visit_google_earth,
     visit_google_maps,
+    visit_google_search_location,
 )
 from network import build_curl_context, fetch_headers, fetch_text, http_status
 from persona import load_lines, pick_browser_ua, pick_session_ua, random_coord, uri_encode_keyword
@@ -38,8 +39,10 @@ _SLEEP_MIN = 8
 _SLEEP_MAX = 18
 _MAPS_DWELL_SEC = 12
 _EARTH_DWELL_SEC = 18
-_MAX_MAPS_BROWSER = 3   # Maps 浏览器偏移次数上限；每次 Maps 偏移成功后立即跟一次 Earth 偏移
-_MAX_EARTH_BROWSER = 3  # Earth 跟随 Maps，两者次数保持一致
+_MAX_MAPS_BROWSER = 3    # Maps 浏览器偏移次数上限；每次 Maps 偏移成功后立即跟一次 Earth 偏移
+_MAX_EARTH_BROWSER = 3   # Earth 跟随 Maps，两者次数保持一致
+_MAX_SEARCH_LOC = 3      # 搜索页「更新位置信息」独立通道上限
+_SEARCH_LOC_DWELL_SEC = 15
 
 
 def run(cfg: dict | None = None) -> int:
@@ -88,8 +91,10 @@ def _run_locked(cfg: dict) -> int:
     maps_locale = parse_lang_locale(lang)
     maps_geo_visits = 0
     earth_geo_visits = 0
+    search_loc_visits = 0
     maps_browser_left = _MAX_MAPS_BROWSER
     earth_browser_left = _MAX_EARTH_BROWSER
+    search_loc_left = _MAX_SEARCH_LOC
     session_start = time.monotonic()
     actions_done = 0
 
@@ -138,7 +143,7 @@ def _run_locked(cfg: dict) -> int:
         MODULE,
         "INFO ",
         f"会话预算: {_SESSION_BUDGET_SEC}s | 动作 {total_actions} 次 | "
-        f"Maps 偏移≤{maps_browser_left} 次 (Earth 跟随)",
+        f"Maps≤{maps_browser_left}(Earth跟随) | 搜索定位≤{search_loc_left}",
     )
 
     for i in range(1, total_actions + 1):
@@ -216,9 +221,32 @@ def _run_locked(cfg: dict) -> int:
 
             if code != 200 and maps_geo_mode == "auto":
                 code = http_status(url, ctx, ua=session_ua, follow=False, timeout=15)
+        elif action_type == 5 and maps_geo_mode in ("true", "auto") and search_loc_left > 0:
+            search_loc_left -= 1
+            url = f"https://www.google.com/search?q={encoded}&{lang}"
+            log(
+                cfg,
+                MODULE,
+                "INFO ",
+                f"搜索定位动作 [{i}/{total_actions}] | 关键词: {keyword[:40]}",
+            )
+            geo_result = visit_google_search_location(
+                search_url=url,
+                latitude=action_lat,
+                longitude=action_lon,
+                user_agent=browser_ua,
+                locale=maps_locale,
+                dwell_sec=_SEARCH_LOC_DWELL_SEC,
+                log=_log,
+            )
+            if geo_result == "ok":
+                code = 200
+                search_loc_visits += 1
+            else:
+                log(cfg, MODULE, "WARN ", f"搜索定位访问失败 ({geo_result})，回退为 HTTP。")
+                code = http_status(url, ctx, ua=session_ua, follow=True, timeout=15)
         elif action_type == 5:
-            # Earth 不再独立触发浏览器偏移（已跟随 Maps），此处仅保留 HTTP 探测
-            url = "https://earth.google.com/"
+            url = f"https://www.google.com/search?q={encoded}&{lang}"
             code = http_status(url, ctx, ua=session_ua, follow=True, timeout=15)
         else:
             url = "https://connectivitycheck.gstatic.com/generate_204"
@@ -266,6 +294,7 @@ def _run_locked(cfg: dict) -> int:
     log(cfg, MODULE, "SCORE", f"自检结论: {status}")
     log(cfg, MODULE, "INFO ", f"本次会话 Maps 虚拟定位访问: {maps_geo_visits} 次")
     log(cfg, MODULE, "INFO ", f"本次会话 Earth 虚拟定位访问: {earth_geo_visits} 次")
+    log(cfg, MODULE, "INFO ", f"本次会话 搜索定位更新: {search_loc_visits} 次")
     record_google_session(
         cfg,
         conclusion=status,
