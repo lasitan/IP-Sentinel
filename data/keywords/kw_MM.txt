@@ -1,11 +1,18 @@
+earthquake
+погода
+thaiticketmajor
+world cup
+nba
+cristiano ronaldo
+england vs costa rica
+portugal vs nigeria
+myanmar (burma)
 argentina vs iceland
 philippines vs myanmar
 myanmar vs thailand
 spain vs peru
-nba
 france vs northern ireland
 argentina vs honduras
-cristiano ronaldo
 england vs new zealand
 brazil vs egypt
 portugal vs chile
@@ -28,7 +35,6 @@ champions league final
 psg
 min aung hlaing
 champions league
-myanmar (burma)
 အီရန်
 outlook
 ရန်ကုန်
@@ -68,7 +74,6 @@ bournemouth vs man city
 arsenal vs burnley
 ငလျင်
 earthquake near me
-earthquake
 inter miami vs portland
 paris fc vs psg
 barcelona vs real betis
@@ -93,8 +98,3 @@ one championship
 fa youth cup final
 gta6
 iphone
-videos
-real madrid vs real oviedo
-xiaomi 17 max
-sony xperia 1 viii
-cincinnati vs inter miami

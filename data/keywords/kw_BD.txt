@@ -1,3 +1,13 @@
+lotto
+প্রার্থী
+espn
+sports
+খেলাধুলা
+icc
+marnus labuschagne
+josh inglis
+cricket live score
+বাংলাদেশ জাতীয় ক্রিকেট দল
 লেবানন
 ডোনাল্ড ট্রাম্প
 fable 5
@@ -14,7 +24,6 @@ sling
 cricbuzz live
 cricbuzz live score
 cricinfo
-icc
 espncricinfo
 litton das
 national university
@@ -89,12 +98,3 @@ kaler kantho
 বাংলাদেশের পররাষ্ট্রমন্ত্রী
 world cup 2026 fixtures
 whatsapp
-বাংলাদেশ প্রতিদিন
-kalbela
-anandabazar
-bangladesh pratidin
-newspaper
-প্রথম আলো
-argentina
-argentina match
-men's t20i asian games qualifier
