@@ -635,6 +635,29 @@ class MasterHandlers:
             self.tg.edit_reply_markup(dest, msg_id, kb, message_thread_id=thread)
         return True
 
+    def handle_autosvq(self, chat_id: str, text: str) -> bool:
+        """处理 Agent 自动入库消息 #AUTOSVQ#|node|score|goog|play|gemini。"""
+        if "#AUTOSVQ#" not in text:
+            return False
+        line = next((ln for ln in text.splitlines() if "#AUTOSVQ#" in ln), text)
+        parts = line.split("|")
+        if len(parts) < 6:
+            return False
+        _, raw_node, raw_score, goog, nf, gpt = parts[:6]
+        node = sanitize_node_name(raw_node)
+        score = sanitize_score(raw_score)
+        goog = sanitize_status_field(goog)
+        nf = sanitize_status_field(nf)
+        gpt = sanitize_status_field(gpt)
+        if not node or not score:
+            return True
+        self.db.execute(
+            """INSERT INTO ip_trend_log (node_name, scam_score, goog_status, nf_status, gpt_status)
+               VALUES (?, ?, ?, ?, ?)""",
+            (node, int(score), goog, nf, gpt),
+        )
+        return True
+
     def handle_register(self, chat_id: str, text: str) -> bool:
         if "#REGISTER#" not in text:
             return False
@@ -773,6 +796,9 @@ class MasterHandlers:
             self.tg.answer_callback(cb_id)
 
         if self.handle_register(chat_id, text):
+            return
+
+        if self.handle_autosvq(chat_id, text):
             return
 
         auth = self._auth_key(chat_id)

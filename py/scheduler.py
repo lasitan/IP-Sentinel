@@ -42,7 +42,7 @@ def _resolve_updater_time(cfg: dict) -> tuple[int, int]:
 
 
 class InternalScheduler:
-    """长驻调度器：管理 runner / updater / report 的周期性触发."""
+    """长驻调度器：管理 runner / updater / report / quality 的周期性触发."""
 
     def __init__(self) -> None:
         self._stop = threading.Event()
@@ -66,10 +66,11 @@ class InternalScheduler:
             self._spawn("runner.py", "定时巡逻")
             self._stop.wait(_RUNNER_INTERVAL_SEC)
 
-    # ── 每日任务：updater + report ──────────────────────────────────────────
+    # ── 每日任务：updater + report + quality ────────────────────────────────
     def _daily_loop(self) -> None:
         last_updater: datetime.date | None = None
         last_report: datetime.date | None = None
+        last_quality: datetime.date | None = None
 
         while not self._stop.is_set():
             self._stop.wait(_DAILY_CHECK_SEC)
@@ -92,12 +93,17 @@ class InternalScheduler:
                 last_report = today
                 self._spawn("report.py", "每日 Telegram 日报")
 
-    def _spawn(self, script: str, label: str) -> None:
+            # 每日 UTC 00:00 跑一次 IP 污染检测并自动入库
+            if today != last_quality and now.hour == 0 and now.minute == 0:
+                last_quality = today
+                self._spawn("mod_quality.py", "每日 IP 污染检测", extra_env={"QUALITY_AUTO_SAVE": "1"})
+
+    def _spawn(self, script: str, label: str, *, extra_env: dict[str, str] | None = None) -> None:
         cfg = load_config()
         if not cfg:
             return
         _slog(cfg, "INFO ", f"调度触发: {label} ({script})")
-        spawn_py_script(script, log_module="Sched")
+        spawn_py_script(script, log_module="Sched", extra_env=extra_env)
 
 
 def start_scheduler() -> InternalScheduler:
