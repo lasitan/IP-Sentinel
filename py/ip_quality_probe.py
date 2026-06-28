@@ -445,3 +445,51 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
             "DNSBlacklist": {"Blacklisted": "0", "Marked": "0", "Total": "0", "Clean": "0"},
         },
     }
+
+
+def probe_unlock_cn(ctx: CurlContext) -> tuple[bool, str]:
+    """并发探测三大服务（YouTube Premium / Google Play / Gemini）解锁状态。
+
+    返回 ``(is_cn_locked, detail)``：
+
+    - ``is_cn_locked = True``：任一服务确认 CN/受限，不应信任地理探针结果。
+    - ``detail``：各服务状态描述字符串，用于上层日志展示。
+
+    判定规则：
+    - YouTube Premium 返回「送中」→ CN
+    - Google Play 区域为 CN → CN
+    - Gemini 返回「失败」（不在解锁白名单）→ CN/受限
+    """
+    media = _run_media_probes(ctx)
+
+    yt = media.get("YoutubePremium", {})
+    play = media.get("GooglePlay", {})
+    gemini = media.get("Gemini", {})
+
+    cn_flags: list[str] = []
+
+    if yt.get("Status") == "送中":
+        cn_flags.append(f"YT→送中")
+
+    if play.get("Region") == "CN":
+        cn_flags.append(f"Play→CN")
+
+    if gemini.get("Status") == "失败":
+        gcode = gemini.get("Region") or "?"
+        cn_flags.append(f"Gemini→失败({gcode})")
+
+    def _fmt(name: str, r: dict) -> str:
+        st = r.get("Status", "N/A")
+        rg = r.get("Region", "")
+        return f"{name}:{st}" + (f"({rg})" if rg else "")
+
+    detail = " | ".join([
+        _fmt("YT", yt),
+        _fmt("Play", play),
+        _fmt("Gemini", gemini),
+    ])
+
+    if cn_flags:
+        return True, f"{' / '.join(cn_flags)} ← {detail}"
+
+    return False, detail

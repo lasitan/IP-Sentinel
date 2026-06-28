@@ -97,6 +97,98 @@ def target_country_code(region_code: str) -> str:
     return "GB" if cc == "UK" else cc
 
 
+# ── 三大家：Gemini / Google Play / YouTube ────────────────────────────────────
+
+def parse_gemini_gl(html: str) -> str:
+    """从 Gemini 页面解析区域码（INNERTUBE/gl 模式，CN 域名优先判定）."""
+    if not html:
+        return ""
+    if re.search(r"google\.cn|gemini\.google\.cn", html, re.I):
+        return "CN"
+    return _first_regex(
+        html,
+        [
+            r'"INNERTUBE_CONTEXT_GL":"([A-Za-z]{2})"',
+            r'"userCountryCode":"([A-Za-z]{2})"',
+            r'"gl":"([A-Za-z]{2})"',
+            r'"countryCode":"([A-Za-z]{2})"',
+        ],
+    )
+
+
+def parse_play_gl(html: str) -> str:
+    """从 Google Play 页面解析区域码."""
+    if not html:
+        return ""
+    if re.search(r"google\.cn|play\.google\.cn", html, re.I):
+        return "CN"
+    return _first_regex(
+        html,
+        [
+            r'"STORE_COUNTRY":"([A-Za-z]{2})"',
+            r'"gl":"([A-Za-z]{2})"',
+            r'"userCountryCode":"([A-Za-z]{2})"',
+            r'"countryCode":"([A-Za-z]{2})"',
+            r'[?&]gl=([A-Za-z]{2})(?:&|"|\b)',
+        ],
+    )
+
+
+def parse_youtube_gl(html: str) -> str:
+    """从 YouTube 主页解析区域码（INNERTUBE_CONTEXT_GL / contentRegion）."""
+    if not html:
+        return ""
+    if re.search(r"www\.google\.cn", html, re.I):
+        return "CN"
+    return _first_regex(
+        html,
+        [
+            r'"INNERTUBE_CONTEXT_GL":"([A-Za-z]{2})"',
+            r'"contentRegion":"([A-Za-z]{2})"',
+            r'"gl":"([A-Za-z]{2})"',
+        ],
+    )
+
+
+def score_three_majors(
+    gemini_gl: str,
+    play_gl: str,
+    yt_gl: str,
+    target_cc: str,
+) -> str:
+    """
+    评估 Gemini / Google Play / YouTube 三大家的区域状态。
+    三大家均返回 CN → 直接认定为中国大陆，不信任其他偏移值。
+    """
+    sources = [("Gemini", gemini_gl), ("Play", play_gl), ("YouTube", yt_gl)]
+    valid = [(n, v) for n, v in sources if v]
+    if not valid:
+        return "❓ 三大家探针全部超时或无响应"
+
+    cn_names = [n for n, v in valid if v == "CN"]
+    valid_vals = [v for _, v in valid]
+    status_str = " | ".join(f"{n}: {v}" for n, v in valid)
+
+    # 所有有效探针均为 CN → 确认 CN
+    if all(v == "CN" for v in valid_vals):
+        return f"❌ 确认 CN：三大家（{' / '.join(n for n, _ in valid)}）均判定中国大陆"
+
+    # 2/3 为 CN
+    if len(cn_names) >= 2:
+        return f"❌ 大概率 CN：{' / '.join(cn_names)} 判定中国大陆 | {status_str}"
+
+    # 1/3 为 CN
+    if cn_names:
+        return f"⚠️ 部分探针返回 CN（{cn_names[0]}），建议持续观察 | {status_str}"
+
+    # 全部非 CN，检查是否达到目标区域
+    matched = [n for n, v in valid if v == target_cc]
+    if matched:
+        return f"✅ 三大家区域达成 | {status_str}"
+
+    return f"⚠️ 区域漂移 | 目标 {target_cc} | {status_str}"
+
+
 def score_geo_status(
     jump_gl: str,
     yt_pr_gl: str,
@@ -107,8 +199,19 @@ def score_geo_status(
     valid = [p for p in probes if p]
     if not valid:
         return "🚨 探针无有效响应（可能被风控拦截）"
+
+    # YT 双探针同为 CN → 直接认定，不采信 Jump 偏移值
+    # Jump 重定向可被 Maps/Earth/Search 虚拟定位动作影响，YT 内容 region 更可靠
+    if yt_pr_gl == "CN" and yt_mu_gl == "CN":
+        if jump_gl and jump_gl != "CN":
+            return (
+                f"❌ 确认 CN：YT 双探针均判定中国大陆，Jump 偏移值（{jump_gl}）不采信"
+            )
+        return "❌ 确认 CN：三核探针均判定中国大陆"
+
     if "CN" in valid:
-        return "❌ 严重：多个探针判定 IP 位于中国大陆"
+        cn_src = [n for n, v in [("Jump", jump_gl), ("Prem", yt_pr_gl), ("Music", yt_mu_gl)] if v == "CN"]
+        return f"⚠️ 部分探针返回 CN（{' / '.join(cn_src)}），建议持续观察"
 
     yt_match = yt_pr_gl == target_cc or yt_mu_gl == target_cc
     if yt_match:

@@ -524,8 +524,8 @@ class MasterHandlers:
         ) or node
         lines = [
             f"📈 *[{alias}] 历史记录 (近 15 次)*\n",
-            "时间(本地)  | 风险 | 谷歌 | NF | GPT",
-            "-----------------------------------------",
+            "时间(本地)  | 风险 | YT区域 | Play | Gemini",
+            "-------------------------------------------",
         ]
         for row in rows:
             score = row["scam_score"] or 0

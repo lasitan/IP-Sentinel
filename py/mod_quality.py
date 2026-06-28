@@ -168,8 +168,12 @@ def _run_inner(cfg: dict) -> int:
     yt = data.get("Media", {}).get("YoutubePremium", {})
     raw_yt_reg = yt.get("Region", "")
     raw_yt_stat = yt.get("Status", "")
-    raw_play = data.get("Media", {}).get("GooglePlay", {}).get("Status", "Unknown")
-    raw_gemini = data.get("Media", {}).get("Gemini", {}).get("Status", "未知")
+
+    play_m = data.get("Media", {}).get("GooglePlay", {})
+    raw_play = play_m.get("Region", "") or play_m.get("Status", "Unknown")
+
+    gemini_m = data.get("Media", {}).get("Gemini", {})
+    raw_gemini = gemini_m.get("Region", "") or gemini_m.get("Status", "未知")
 
     warning = _google_cn_warning(data)
 

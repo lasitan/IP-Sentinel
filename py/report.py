@@ -12,12 +12,21 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from config import load_config
+from geo_probe import (
+    parse_gemini_gl,
+    parse_play_gl,
+    parse_youtube_gl,
+    score_three_majors,
+    target_country_code,
+)
+from ip_quality_probe import probe_unlock_cn
 from log_util import log
-from network import build_curl_context
+from network import build_curl_context, fetch_text
 from session_stats import latest_snapshot, load_sessions, summarize_google, summarize_trust
 from tg_util import tg_delivery, tg_push
 
@@ -118,6 +127,61 @@ def _remote_agent_version() -> str:
     return ""
 
 
+def _live_geo_probe(cfg: dict, ctx) -> str:
+    """实时探测三大家区域状态，同步并发解锁检测。
+
+    解锁检测（YouTube Premium / Google Play / Gemini）若判定为 CN，
+    直接返回 CN 结论，不采信可被虚拟定位影响的地理探针结果。
+    """
+    _UA = (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    def _fetch_gemini() -> str:
+        try:
+            return parse_gemini_gl(fetch_text("https://gemini.google.com/", ctx, ua=_UA, timeout=12))
+        except Exception:
+            return ""
+
+    def _fetch_play() -> str:
+        try:
+            return parse_play_gl(fetch_text("https://play.google.com/store", ctx, ua=_UA, timeout=12))
+        except Exception:
+            return ""
+
+    def _fetch_yt() -> str:
+        try:
+            return parse_youtube_gl(fetch_text("https://www.youtube.com/", ctx, ua=_UA, timeout=12))
+        except Exception:
+            return ""
+
+    def _unlock() -> tuple[bool, str]:
+        try:
+            return probe_unlock_cn(ctx)
+        except Exception:
+            return False, "解锁检测异常"
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_g = pool.submit(_fetch_gemini)
+        f_p = pool.submit(_fetch_play)
+        f_y = pool.submit(_fetch_yt)
+        f_u = pool.submit(_unlock)
+
+        gemini_gl = f_g.result()
+        play_gl = f_p.result()
+        yt_gl = f_y.result()
+        is_cn_locked, unlock_detail = f_u.result()
+
+    tcc = target_country_code(cfg.get("REGION_CODE", "US"))
+
+    if is_cn_locked:
+        return f"❌ 解锁确认 CN，探针不采信 | {unlock_detail}"
+
+    return score_three_majors(gemini_gl, play_gl, yt_gl, tcc)
+
+
 def _send_telegram(cfg: dict, payload: dict) -> bool:
     api_url = cfg.get("TG_API_URL", "")
     dest_chat, thread_id = tg_delivery(cfg)
@@ -185,11 +249,13 @@ def run() -> int:
 
         if cfg.get("ENABLE_GOOGLE", "false").lower() == "true":
             g = summarize_google(sessions)
+            live_status = _live_geo_probe(cfg, ctx)
             msg += (
                 f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
                 f"🚀 执行总数: {g['total']} 次 (胜率: **{g['rate']}%**)\n"
                 f"✅ 成功: {g['ok']} | ❌ CN 判定: {g['fail']} | ⚠️ 警告: {g['warn']}\n"
-                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次 | Search: **{g['search_loc']}** 次"
+                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次 | Search: **{g['search_loc']}** 次\n"
+                f"📡 当前实时状态: {live_status}"
             )
 
         if cfg.get("ENABLE_TRUST", "false").lower() == "true":
