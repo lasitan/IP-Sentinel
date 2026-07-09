@@ -11,12 +11,14 @@ import threading
 import time
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from master.agent_client import call_agent
 from master.config import save_master_config_keys
 from master.db import MasterDB
 from master.flags import get_flag
+from master.forum_topics import ForumTopicRegistry, normalize_topic_name
 from master_public_ip import normalize_ip_for_storage, resolve_public_ip
 from master.security import (
     alias_to_b64,
@@ -61,6 +63,9 @@ class MasterHandlers:
         self._ctx = _TgCtx("", "", None, None, False, "")
         self._bot_username = (tg.get_me_username() or "").lower()
         self._pending_rename: dict[int, str] = {}
+        self._forum_registry = ForumTopicRegistry(
+            str(Path(str(cfg.get("MASTER_DIR", "/opt/ip_sentinel_master"))) / "core" / "forum_topics.json")
+        )
         self._master_public_ip = normalize_ip_for_storage(resolve_public_ip(self.cfg))
         self._sync_master_wss_description()
 
@@ -179,47 +184,142 @@ class MasterHandlers:
     def _topic_title(self, alias: str, region: str) -> str:
         return f"{alias} · {region}"
 
-    def _fetch_forum_topics_map(self) -> dict[str, int]:
-        """Telegram 群组当前真实话题：标题 → message_thread_id."""
-        if not self.forum_chat_id:
-            return {}
-        out: dict[str, int] = {}
-        for topic in self.tg.get_forum_topics(self.forum_chat_id):
-            name = str(topic.get("name") or "").strip()
-            tid = topic.get("message_thread_id")
-            if name and tid:
-                out[name] = int(tid)
-        return out
+    def register_forum_topic(self, thread_id: int, name: str) -> None:
+        if self.forum_chat_id and thread_id and name:
+            self._forum_registry.set_topic(self.forum_chat_id, thread_id, name)
+
+    def ingest_forum_topic_update(self, update: dict[str, Any]) -> None:
+        """从 getUpdates 中的 forum_topic_created/edited 积累话题列表."""
+        if not self.forum_mode or not self.forum_chat_id:
+            return
+        msg = update.get("message") or {}
+        chat_id = str(msg.get("chat", {}).get("id") or "")
+        if chat_id != self.forum_chat_id:
+            return
+        thread_raw = msg.get("message_thread_id")
+        if not thread_raw:
+            return
+        thread_id = int(thread_raw)
+        created = msg.get("forum_topic_created") or {}
+        if created.get("name"):
+            self.register_forum_topic(thread_id, str(created["name"]))
+            return
+        edited = msg.get("forum_topic_edited") or {}
+        if edited.get("name"):
+            self.register_forum_topic(thread_id, str(edited["name"]))
+            return
+        if msg.get("forum_topic_closed"):
+            self._forum_registry.remove_topic(self.forum_chat_id, thread_id)
+
+    def _build_forum_topic_index(
+        self, owner: str
+    ) -> tuple[dict[str, int], dict[int, str]]:
+        """合并本地注册表 + DB 绑定，构建话题索引."""
+        rows = self.db.execute(
+            """SELECT node_name, COALESCE(node_alias, node_name) AS alias, region,
+                      message_thread_id FROM nodes WHERE chat_id=?""",
+            (owner,),
+        )
+        seed_rows = [
+            {
+                "node_name": r["node_name"],
+                "alias": r["alias"],
+                "region": r["region"] or "UNKNOWN",
+                "message_thread_id": r["message_thread_id"],
+                "forum_chat_id": self.forum_chat_id,
+            }
+            for r in rows
+        ]
+        self._forum_registry.seed_from_nodes(seed_rows, title_fn=self._topic_title)
+        by_name = self._forum_registry.by_name(self.forum_chat_id)
+        by_id = self._forum_registry.by_id(self.forum_chat_id)
+        return by_name, by_id
 
     def _resolve_node_thread_from_topics(
         self,
+        node_name: str,
         alias: str,
         region: str,
         db_thread: int | None,
-        live_topics: dict[str, int],
+        by_name: dict[str, int],
+        by_id: dict[int, str],
+        claimed: set[int] | None = None,
     ) -> int | None:
-        """在 Telegram 真实话题列表中解析节点话题（优先标题，其次 DB thread_id）."""
-        title = self._topic_title(alias, region)
-        if title in live_topics:
-            return live_topics[title]
-        if db_thread and db_thread in live_topics.values():
-            return db_thread
+        """在已知话题索引中解析节点话题（标题精确/模糊 + DB thread 探测）."""
+        region = region or "UNKNOWN"
+        taken = claimed or set()
+
+        candidates: list[str] = []
+        for title in (
+            self._topic_title(alias, region),
+            self._topic_title(node_name, region),
+            alias.strip(),
+            node_name.strip(),
+        ):
+            if title and title not in candidates:
+                candidates.append(title)
+
+        for title in candidates:
+            tid = by_name.get(title)
+            if tid and tid not in taken:
+                return tid
+
+        norm_alias = normalize_topic_name(alias)
+        norm_node = normalize_topic_name(node_name)
+        norm_region = normalize_topic_name(region)
+
+        for title in candidates:
+            norm_title = normalize_topic_name(title)
+            for tid, name in by_id.items():
+                if tid in taken:
+                    continue
+                if normalize_topic_name(name) == norm_title:
+                    return tid
+
+        for tid, name in by_id.items():
+            if tid in taken:
+                continue
+            norm_name = normalize_topic_name(name)
+            if norm_alias and norm_alias in norm_name:
+                if norm_region in norm_name or region.lower() in name.lower():
+                    return tid
+            if norm_node and norm_node in norm_name and norm_node != norm_alias:
+                if norm_region in norm_name or region.lower() in name.lower():
+                    return tid
+
+        if db_thread and db_thread not in taken:
+            if db_thread in by_id:
+                return db_thread
+            if self.forum_chat_id and self.tg.verify_forum_topic(
+                self.forum_chat_id, db_thread
+            ):
+                self.register_forum_topic(
+                    db_thread, self._topic_title(alias or node_name, region)
+                )
+                return db_thread
+
         return None
 
     def _count_nodes_missing_live_topic(self, owner: str) -> int:
         rows = self.db.execute(
-            """SELECT COALESCE(node_alias, node_name) AS alias, region, message_thread_id
+            """SELECT node_name, COALESCE(node_alias, node_name) AS alias, region,
+                      message_thread_id
                FROM nodes WHERE chat_id=?""",
             (owner,),
         )
         if not rows:
             return 0
-        live = self._fetch_forum_topics_map()
+        by_name, by_id = self._build_forum_topic_index(owner)
         missing = 0
         for row in rows:
             db_thread = int(row["message_thread_id"]) if row["message_thread_id"] else None
             if not self._resolve_node_thread_from_topics(
-                row["alias"], row["region"] or "UNKNOWN", db_thread, live
+                row["node_name"],
+                row["alias"],
+                row["region"] or "UNKNOWN",
+                db_thread,
+                by_name,
+                by_id,
             ):
                 missing += 1
         return missing
@@ -288,6 +388,14 @@ class MasterHandlers:
             self.tg.send_message(dest, text, markdown=markdown, message_thread_id=thread)
             return
         self.tg.send_message(self._ctx.owner, text, markdown=markdown)
+
+    def _private_ui(self, text: str, keyboard: list, msg_id: int | None = None) -> None:
+        """私聊 owner 菜单（话题删除等管理操作仅在此展示）."""
+        owner = self._ctx.owner
+        if msg_id and self._ctx.chat == owner:
+            self.tg.edit_ui(owner, msg_id, text, keyboard)
+        else:
+            self.tg.send_ui(owner, text, keyboard)
 
     def _forum_menu(
         self,
@@ -528,9 +636,10 @@ class MasterHandlers:
         alias: str | None = None,
         region: str | None = None,
         send_console: bool = True,
-        live_topics: dict[str, int] | None = None,
+        topic_index: tuple[dict[str, int], dict[int, str]] | None = None,
+        claimed: set[int] | None = None,
     ) -> int | None:
-        """创建/匹配节点话题：以 Telegram 当前话题列表为准，并回写 DB."""
+        """创建/匹配节点话题：本地注册表 + DB + editForumTopic 探测."""
         if not self.forum_mode or not self.forum_chat_id:
             return None
         if alias is None or region is None:
@@ -549,9 +658,19 @@ class MasterHandlers:
         else:
             db_thread = self._node_thread_id(owner_chat_id, node)
 
-        topics = live_topics if live_topics is not None else self._fetch_forum_topics_map()
+        if topic_index:
+            by_name, by_id = topic_index
+        else:
+            by_name, by_id = self._build_forum_topic_index(owner_chat_id)
+
         thread_id = self._resolve_node_thread_from_topics(
-            alias, region or "UNKNOWN", db_thread, topics
+            node,
+            alias,
+            region or "UNKNOWN",
+            db_thread,
+            by_name,
+            by_id,
+            claimed,
         )
 
         if not thread_id:
@@ -560,6 +679,11 @@ class MasterHandlers:
             )
             if not thread_id:
                 return None
+
+        canonical = self._topic_title(alias, region or "UNKNOWN")
+        self.register_forum_topic(thread_id, canonical)
+        if claimed is not None:
+            claimed.add(thread_id)
 
         if thread_id != db_thread:
             self.db.execute(
@@ -1009,6 +1133,15 @@ class MasterHandlers:
         elif text == "forum_topics_rebuild":
             self._cmd_forum_topics_rebuild(chat_id, msg_id, auth)
             handled = True
+        elif text == "forum_topics_delete":
+            self._cmd_forum_topics_delete(chat_id, msg_id)
+            handled = True
+        elif text.startswith("forum_topic_del:"):
+            self._cmd_forum_topic_del_confirm(chat_id, text.split(":", 1)[1], msg_id)
+            handled = True
+        elif text.startswith("forum_topic_del_yes:"):
+            self._cmd_forum_topic_del_execute(chat_id, text.split(":", 1)[1], msg_id, auth)
+            handled = True
         elif text == "forum_bind_prompt":
             self._cmd_forum_bind_prompt(chat_id)
             handled = True
@@ -1075,6 +1208,8 @@ class MasterHandlers:
         else:
             topic_label = "📌 开启节点话题模式"
         kb.append([{"text": topic_label, "callback_data": "forum_topics_rebuild"}])
+        if self.forum_mode and self._ctx.chat == self._ctx.owner:
+            kb.append([{"text": "🗑️ 删除节点话题", "callback_data": "forum_topics_delete"}])
         kb.append(
             [{"text": "🌟 前往 GitHub 点亮星标", "url": "https://github.com/lasitan/IP-Sentinel"}],
         )
@@ -1092,8 +1227,11 @@ class MasterHandlers:
         if self._ctx.chat == self.forum_chat_id:
             self._forum_menu(msg, kb, msg_id)
             return
-        if self.forum_mode and self.forum_chat_id:
+        if self.forum_mode and self.forum_chat_id and self._ctx.chat != self._ctx.owner:
             self._show_global_menu(msg, kb, msg_id)
+            return
+        if self.forum_mode and self._ctx.chat == self._ctx.owner:
+            self._private_ui(msg, kb, msg_id)
             return
         if msg_id:
             self.tg.edit_ui(dest, msg_id, msg, kb, message_thread_id=thread)
@@ -1643,6 +1781,131 @@ class MasterHandlers:
         )
         self._cmd_forum_topics_rebuild(chat_id, None, auth)
 
+    def _cmd_forum_topics_delete(self, chat_id: str, msg_id: int | None) -> None:
+        """私聊：选择要删除的节点话题（不删除节点本身）."""
+        if not self.forum_mode or not self.forum_chat_id:
+            self._private_ui(
+                "⚠️ 未开启话题模式。",
+                [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]],
+                msg_id if self._ctx.chat == self._ctx.owner else None,
+            )
+            return
+        if self._ctx.chat != self._ctx.owner:
+            self.tg.send_message(
+                self._ctx.owner,
+                "⚠️ 话题删除请在 **私聊** 中操作。",
+            )
+            return
+        rows = self.db.execute(
+            """SELECT node_name, COALESCE(node_alias, node_name) AS alias, region,
+                      message_thread_id
+               FROM nodes WHERE chat_id=? AND message_thread_id IS NOT NULL
+               ORDER BY alias""",
+            (chat_id,),
+        )
+        back = [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]]
+        if not rows:
+            self._private_ui(
+                "🗑️ **删除节点话题**\n\n当前没有已绑定的节点话题。",
+                back,
+                msg_id,
+            )
+            return
+        kb: list = []
+        for row in rows:
+            alias = row["alias"]
+            region = row["region"] or "UNKNOWN"
+            kb.append(
+                [{"text": f"🗑️ {alias} · {region}", "callback_data": f"forum_topic_del:{row['node_name']}"}]
+            )
+        kb.append(back)
+        self._private_ui(
+            "🗑️ **删除节点话题**\n\n"
+            "选择要删除的群组话题。节点本身不会被删除，仅关闭 Telegram 话题并清除绑定；"
+            "之后可通过「补建节点话题」重新创建。",
+            kb,
+            msg_id,
+        )
+
+    def _cmd_forum_topic_del_confirm(
+        self, chat_id: str, node: str, msg_id: int | None
+    ) -> None:
+        if self._ctx.chat != self._ctx.owner:
+            self.tg.send_message(self._ctx.owner, "⚠️ 话题删除请在私聊中操作。")
+            return
+        node = sanitize_node_name(node)
+        row = self.db.execute(
+            """SELECT COALESCE(node_alias, node_name) AS alias, region, message_thread_id
+               FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1""",
+            (chat_id, node),
+        )
+        if not row or not row[0]["message_thread_id"]:
+            self._cmd_forum_topics_delete(chat_id, msg_id)
+            return
+        alias = row[0]["alias"]
+        region = row[0]["region"] or "UNKNOWN"
+        kb = [
+            [{"text": "🚨 确认删除话题", "callback_data": f"forum_topic_del_yes:{node}"}],
+            [{"text": "取消", "callback_data": "forum_topics_delete"}],
+        ]
+        self._private_ui(
+            f"🗑️ **确认删除话题**\n\n"
+            f"节点: `{alias} · {region}`\n"
+            f"群组: `{self.forum_chat_id}`\n\n"
+            "⚠️ 将关闭该 Telegram 话题并清除绑定，节点数据保留。",
+            kb,
+            msg_id,
+        )
+
+    def _cmd_forum_topic_del_execute(
+        self, chat_id: str, node: str, msg_id: int | None, auth: str
+    ) -> None:
+        del auth
+        if self._ctx.chat != self._ctx.owner:
+            self.tg.send_message(self._ctx.owner, "⚠️ 话题删除请在私聊中操作。")
+            return
+        node = sanitize_node_name(node)
+        row = self.db.execute(
+            """SELECT COALESCE(node_alias, node_name) AS alias, message_thread_id
+               FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1""",
+            (chat_id, node),
+        )
+        if not row or not row[0]["message_thread_id"]:
+            self._cmd_forum_topics_delete(chat_id, msg_id)
+            return
+        alias = row[0]["alias"]
+        thread = int(row[0]["message_thread_id"])
+        ok = bool(
+            self.forum_chat_id
+            and self.tg.delete_forum_topic(self.forum_chat_id, thread)
+        )
+        if ok:
+            self._forum_registry.remove_topic(self.forum_chat_id, thread)
+            self.db.execute(
+                """UPDATE nodes SET message_thread_id=NULL, topic_ui_message_id=NULL,
+                   topic_ui_edit_count=0 WHERE chat_id=? AND node_name=?""",
+                (chat_id, node),
+            )
+            threading.Thread(
+                target=call_agent,
+                args=(chat_id, node, "/trigger_set_topic", {"clear": "1"}),
+                daemon=True,
+            ).start()
+            result = f"✅ 已删除节点 `{alias}` 的话题并清除绑定。"
+        else:
+            result = (
+                f"❌ 删除话题失败（`{alias}`）。\n"
+                "请确认 Bot 为群组管理员且拥有「管理话题」权限。"
+            )
+        self._private_ui(
+            result,
+            [
+                [{"text": "🗑️ 继续删除", "callback_data": "forum_topics_delete"}],
+                [{"text": "🏠 返回主菜单", "callback_data": "/start"}],
+            ],
+            msg_id,
+        )
+
     def _cmd_forum_topics_rebuild(self, chat_id: str, msg_id: int | None, auth: str) -> None:
         """按 Telegram 当前话题列表匹配/补建节点话题，并同步 Agent 绑定."""
         if not self.forum_mode:
@@ -1673,7 +1936,7 @@ class MasterHandlers:
             self.tg.send_message(chat_id, "⚠️ 暂无已注册节点。")
             return
 
-        wait = f"⏳ 正在从 Telegram 拉取话题列表并处理 {len(rows)} 个节点…"
+        wait = f"⏳ 正在扫描已知话题并处理 {len(rows)} 个节点…"
         if self._ctx.chat == self.forum_chat_id:
             self._forum_menu(
                 wait,
@@ -1685,23 +1948,28 @@ class MasterHandlers:
         else:
             self.tg.send_message(chat_id, wait)
 
-        live_topics = self._fetch_forum_topics_map()
-        if not live_topics and rows:
+        topic_index = self._build_forum_topic_index(chat_id)
+        by_name, by_id = topic_index
+        if not by_id:
             print(
-                "[ip-sentinel-master] getForumTopics 未返回话题，将尝试为缺失节点新建",
+                "[ip-sentinel-master] 话题注册表为空：将依赖 DB thread_id 探测；"
+                "Bot 无法 list 历史话题，请确保 Master 曾在线或 DB 有 thread_id",
                 flush=True,
             )
 
         matched = 0
         created = 0
         failed: list[str] = []
+        claimed: set[int] = set()
         for row in rows:
             node = row["node_name"]
             alias = row["alias"]
             region = row["region"] or "UNKNOWN"
             db_thread = int(row["message_thread_id"]) if row["message_thread_id"] else None
-            existed_in_tg = bool(
-                self._resolve_node_thread_from_topics(alias, region, db_thread, live_topics)
+            existed = bool(
+                self._resolve_node_thread_from_topics(
+                    node, alias, region, db_thread, by_name, by_id, claimed
+                )
             )
 
             thread_id = self._setup_node_topic(
@@ -1710,23 +1978,26 @@ class MasterHandlers:
                 auth,
                 alias=alias,
                 region=region,
-                send_console=not existed_in_tg,
-                live_topics=live_topics,
+                send_console=not existed,
+                topic_index=topic_index,
+                claimed=claimed,
             )
             if thread_id:
-                if existed_in_tg:
+                if existed:
                     matched += 1
                 else:
                     created += 1
-                    live_topics[self._topic_title(alias, region)] = thread_id
+                by_name[self._topic_title(alias, region)] = thread_id
+                by_id[thread_id] = self._topic_title(alias, region)
             else:
                 failed.append(alias)
             time.sleep(0.35)
 
         lines = [
             "✅ **话题同步完成**",
-            f"• 匹配 Telegram 已有话题: `{matched}`",
+            f"• 识别已有话题: `{matched}`",
             f"• 新建话题: `{created}`",
+            f"• 注册表已知话题: `{len(by_id)}`",
             f"• 已同步 Agent 绑定: `{matched + created}`",
         ]
         if failed:

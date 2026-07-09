@@ -62,6 +62,8 @@ def run() -> None:
             uid = update.get("update_id", 0)
             next_offset = uid + 1
 
+            handlers.ingest_forum_topic_update(update)
+
             chat_id, text, cb_id, msg_id, thread_id, user_msg_id, reply_to = _extract_update(update)
             if not chat_id:
                 offset_file.write_text(str(next_offset), encoding="utf-8")

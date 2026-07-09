@@ -181,27 +181,33 @@ class TelegramAPI:
         thread = (body.get("result") or {}).get("message_thread_id")
         return int(thread) if thread else None
 
-    def get_forum_topics(self, chat_id: str) -> list[dict[str, Any]]:
-        """拉取群组当前全部 Forum 话题（分页）."""
-        topics: list[dict[str, Any]] = []
-        offset_topic = 0
-        while True:
-            payload: dict[str, Any] = {"chat_id": chat_id, "limit": 100}
-            if offset_topic:
-                payload["offset_topic"] = offset_topic
-            body = self._post("getForumTopics", payload)
-            if not body.get("ok"):
-                break
-            batch = (body.get("result") or {}).get("topics") or []
-            if not batch:
-                break
-            topics.extend(batch)
-            if len(batch) < 100:
-                break
-            offset_topic = int(batch[-1].get("message_thread_id") or 0)
-            if not offset_topic:
-                break
-        return topics
+    def verify_forum_topic(self, chat_id: str, message_thread_id: int) -> bool:
+        """探测话题 thread 是否仍存在（editForumTopic 无变更调用）."""
+        body = self._post(
+            "editForumTopic",
+            {"chat_id": chat_id, "message_thread_id": int(message_thread_id)},
+        )
+        return bool(body.get("ok"))
+
+    def rename_forum_topic(
+        self, chat_id: str, message_thread_id: int, name: str
+    ) -> bool:
+        body = self._post(
+            "editForumTopic",
+            {
+                "chat_id": chat_id,
+                "message_thread_id": int(message_thread_id),
+                "name": name[:128],
+            },
+        )
+        return bool(body.get("ok"))
+
+    def delete_forum_topic(self, chat_id: str, message_thread_id: int) -> bool:
+        body = self._post(
+            "deleteForumTopic",
+            {"chat_id": chat_id, "message_thread_id": int(message_thread_id)},
+        )
+        return bool(body.get("ok"))
 
     def answer_callback(self, callback_id: str, text: str = "", *, alert: bool = False) -> None:
         payload: dict[str, Any] = {

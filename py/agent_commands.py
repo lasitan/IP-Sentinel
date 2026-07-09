@@ -252,6 +252,10 @@ def execute_agent_command(path: str, params: dict[str, Any] | None = None) -> tu
         return 200, "Action Accepted: fetch_log\n"
 
     if path == "/trigger_set_topic":
+        if str(params.get("clear", "")).lower() in ("1", "true", "yes"):
+            _config_set_keys(cfg, {"MESSAGE_THREAD_ID": "", "TOPIC_BOT_MESSAGE_ID": ""})
+            _webhook_log(cfg, "INFO ", "已清除话题绑定")
+            return 200, "Action Accepted: clear_topic\n"
         dest = re.sub(r"[^0-9-]", "", str(params.get("dest_chat", "")))[:20]
         thread_raw = str(params.get("thread_id", ""))
         bot_raw = str(params.get("bot_msg_id", ""))
