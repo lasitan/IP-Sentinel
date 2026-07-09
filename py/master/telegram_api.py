@@ -19,6 +19,14 @@ def escape_markdown(text: str) -> str:
     return _MD_SPECIAL.sub(r"\\\1", str(text))
 
 
+MASTER_BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "start", "description": "打开主菜单"},
+    {"command": "menu", "description": "打开主菜单"},
+    {"command": "quality", "description": "IP 质量检测 (例: /quality 节点名)"},
+    {"command": "trend", "description": "IP 污染趋势 (例: /trend 节点名)"},
+]
+
+
 class TelegramAPI:
     def __init__(self, token: str) -> None:
         self.base = f"https://api.telegram.org/bot{token}"
@@ -286,3 +294,34 @@ class TelegramAPI:
     def set_my_description(self, description: str) -> bool:
         body = self._post("setMyDescription", {"description": description[:512]})
         return bool(body.get("ok"))
+
+    def set_my_commands(
+        self,
+        commands: list[dict[str, str]],
+        *,
+        scope: dict[str, Any] | None = None,
+        language_code: str = "",
+    ) -> bool:
+        payload: dict[str, Any] = {"commands": commands}
+        if scope:
+            payload["scope"] = scope
+        if language_code:
+            payload["language_code"] = language_code
+        body = self._post("setMyCommands", payload)
+        return bool(body.get("ok"))
+
+    def sync_bot_commands(self) -> None:
+        """向 Telegram 注册 Bot 命令列表（私聊 + 群组）。"""
+        scopes = (
+            {"type": "default"},
+            {"type": "all_group_chats"},
+        )
+        for scope in scopes:
+            if not self.set_my_commands(MASTER_BOT_COMMANDS, scope=scope):
+                print(
+                    f"[ip-sentinel-master] setMyCommands 失败 scope={scope.get('type')}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+        print("[ip-sentinel-master] Telegram 命令列表已同步", flush=True)

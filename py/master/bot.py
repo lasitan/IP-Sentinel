@@ -48,6 +48,7 @@ def run() -> None:
     ws_hub.start()
     bind_ws_hub(ws_hub)
     handlers = MasterHandlers(cfg, db, tg)
+    tg.sync_bot_commands()
 
     print(f"[ip-sentinel-master] 长轮询已启动 | WSS {MASTER_WSS_BIND}:{MASTER_WSS_PORT}", flush=True)
 
