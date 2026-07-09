@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 import traceback
@@ -13,7 +12,7 @@ from config import require_config
 from ip_quality_probe import run_quality_probe
 from log_util import log
 from session_stats import record_quality_session
-from tg_util import apply_thread, build_svq_callback, escape_markdown, tg_delivery, tg_push
+from tg_util import escape_markdown, tg_delivery, tg_push
 
 MODULE = "Quality"
 
@@ -119,6 +118,25 @@ def _port25_label(mail: dict) -> str:
     return "✅ 畅通" if port25 is True else "❌ 封堵"
 
 
+def _auto_save_trend(
+    cfg: dict,
+    node_name: str,
+    safe_scam: str,
+    raw_yt_reg: str,
+    raw_yt_stat: str,
+    raw_play: str,
+    raw_gemini: str,
+) -> None:
+    goog_field = raw_yt_reg if raw_yt_reg and len(raw_yt_reg) <= 4 else raw_yt_stat
+    try:
+        from agent_ws import queue_trend_save
+
+        queue_trend_save(node_name, safe_scam, goog_field, raw_play, raw_gemini)
+        log(cfg, MODULE, "INFO ", "趋势数据已自动入库")
+    except Exception as exc:
+        log(cfg, MODULE, "WARN ", f"自动入库失败: {exc}")
+
+
 def _run_inner(cfg: dict) -> int:
     node_alias = cfg.get("NODE_ALIAS") or cfg.get("NODE_NAME", "未知")
     log(cfg, MODULE, "START", f"========== IP 质量检测启动 [节点: {node_alias}] ==========")
@@ -221,7 +239,6 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
 
     safe_scam = re.sub(r"[^0-9]", "", str(scam)) or "0"
     node_name = cfg.get("NODE_NAME", "Unknown")
-    cb = build_svq_callback(node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_play, raw_gemini)
 
     payload = {
         "text": report,
@@ -229,7 +246,6 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
         "disable_web_page_preview": True,
         "reply_markup": {
             "inline_keyboard": [
-                [{"text": "📥 将本次体检录入趋势库", "callback_data": cb}],
                 [{"text": "⬅️ 返回控制台", "callback_data": f"manage:{node_name}"}],
             ]
         },
@@ -245,16 +261,9 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
             play_status=raw_play,
             gemini_status=raw_gemini,
         )
-        # 调度器触发时自动入库，无需人工点击按钮
-        if os.environ.get("QUALITY_AUTO_SAVE") == "1":
-            goog_field = raw_yt_reg if raw_yt_reg and len(raw_yt_reg) <= 4 else raw_yt_stat
-            try:
-                from agent_ws import queue_trend_save
-
-                queue_trend_save(node_name, safe_scam, goog_field, raw_play, raw_gemini)
-                log(cfg, MODULE, "INFO ", "趋势数据已加入 WS 自动入库队列")
-            except Exception as exc:
-                log(cfg, MODULE, "WARN ", f"自动入库队列失败: {exc}")
+        _auto_save_trend(
+            cfg, node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_play, raw_gemini
+        )
     else:
         log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")
     log(cfg, MODULE, "END  ", "========== IP 质量检测结束 ==========")

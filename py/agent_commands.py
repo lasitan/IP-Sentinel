@@ -236,10 +236,7 @@ def execute_agent_command(path: str, params: dict[str, Any] | None = None) -> tu
 
     if path == "/trigger_quality":
         _webhook_log(cfg, "INFO ", "收到指令: IP 质量检测")
-        extra = {}
-        if str(params.get("auto_save", "")).lower() in ("1", "true", "yes"):
-            extra["QUALITY_AUTO_SAVE"] = "1"
-        if spawn_py_script("mod_quality.py", log_module="WS", extra_env=extra or None):
+        if spawn_py_script("mod_quality.py", log_module="WS"):
             return 200, "Action Accepted: mod_quality.py\n"
         return 503, "503 Service Unavailable: mod_quality.py missing\n"
 

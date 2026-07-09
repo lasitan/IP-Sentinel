@@ -96,7 +96,7 @@ class InternalScheduler:
             # 每日 UTC 00:00 跑一次 IP 污染检测并自动入库
             if today != last_quality and now.hour == 0 and now.minute == 0:
                 last_quality = today
-                self._spawn("mod_quality.py", "每日 IP 污染检测", extra_env={"QUALITY_AUTO_SAVE": "1"})
+                self._spawn("mod_quality.py", "每日 IP 污染检测")
 
     def _spawn(self, script: str, label: str, *, extra_env: dict[str, str] | None = None) -> None:
         cfg = load_config()
