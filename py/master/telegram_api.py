@@ -181,6 +181,28 @@ class TelegramAPI:
         thread = (body.get("result") or {}).get("message_thread_id")
         return int(thread) if thread else None
 
+    def get_forum_topics(self, chat_id: str) -> list[dict[str, Any]]:
+        """拉取群组当前全部 Forum 话题（分页）."""
+        topics: list[dict[str, Any]] = []
+        offset_topic = 0
+        while True:
+            payload: dict[str, Any] = {"chat_id": chat_id, "limit": 100}
+            if offset_topic:
+                payload["offset_topic"] = offset_topic
+            body = self._post("getForumTopics", payload)
+            if not body.get("ok"):
+                break
+            batch = (body.get("result") or {}).get("topics") or []
+            if not batch:
+                break
+            topics.extend(batch)
+            if len(batch) < 100:
+                break
+            offset_topic = int(batch[-1].get("message_thread_id") or 0)
+            if not offset_topic:
+                break
+        return topics
+
     def answer_callback(self, callback_id: str, text: str = "", *, alert: bool = False) -> None:
         payload: dict[str, Any] = {
             "callback_query_id": callback_id,

@@ -16,6 +16,7 @@ from geo_probe import (
     score_geo_status,
     target_country_code,
 )
+from ip_quality_probe import probe_unlock_cn
 from log_util import log
 from maps_browser import (
     maps_geo_enabled,
@@ -289,7 +290,12 @@ def _run_locked(cfg: dict) -> int:
     yt_mu_gl = parse_yt_music_gl(yt_mu_html)
 
     target_cc = target_country_code(cfg.get("REGION_CODE", "US"))
-    status = score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc)
+
+    is_cn_locked, unlock_detail = probe_unlock_cn(ctx)
+    if is_cn_locked:
+        status = f"❌ CN 告警：解锁检测确认中国大陆 | {unlock_detail}"
+    else:
+        status = score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc)
 
     log(cfg, MODULE, "SCORE", f"自检结论: {status}")
     log(cfg, MODULE, "INFO ", f"本次会话 Maps 虚拟定位访问: {maps_geo_visits} 次")

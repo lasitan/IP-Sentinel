@@ -19,6 +19,8 @@ def _stats_path(cfg: dict[str, Any]) -> Path:
 
 def classify_outcome(conclusion: str) -> str:
     text = conclusion or ""
+    if "CN 告警" in text or "CN 判定" in text or "判定中国大陆" in text:
+        return "fail"
     if "❌" in text:
         return "fail"
     if "⚠️" in text or "🚨" in text:
@@ -191,9 +193,15 @@ def record_quality_session(
 def summarize_google(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     rows = [r for r in sessions if r.get("module") == "google"]
     total = len(rows)
-    ok = sum(1 for r in rows if r.get("outcome") == "ok")
-    fail = sum(1 for r in rows if r.get("outcome") == "fail")
-    warn = sum(1 for r in rows if r.get("outcome") == "warn")
+    ok = fail = warn = 0
+    for r in rows:
+        outcome = r.get("outcome") or classify_outcome(str(r.get("conclusion", "")))
+        if outcome == "ok":
+            ok += 1
+        elif outcome == "fail":
+            fail += 1
+        elif outcome == "warn":
+            warn += 1
     maps_geo = sum(int(r.get("maps_visits") or 0) for r in rows)
     earth_geo = sum(int(r.get("earth_visits") or 0) for r in rows)
     search_loc = sum(int(r.get("search_loc_visits") or 0) for r in rows)

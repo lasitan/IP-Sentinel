@@ -176,6 +176,54 @@ class MasterHandlers:
             self._set_topic_ui(owner, node, new_id, 0)
         self._sync_agent_topic_bot(owner, node)
 
+    def _topic_title(self, alias: str, region: str) -> str:
+        return f"{alias} · {region}"
+
+    def _fetch_forum_topics_map(self) -> dict[str, int]:
+        """Telegram 群组当前真实话题：标题 → message_thread_id."""
+        if not self.forum_chat_id:
+            return {}
+        out: dict[str, int] = {}
+        for topic in self.tg.get_forum_topics(self.forum_chat_id):
+            name = str(topic.get("name") or "").strip()
+            tid = topic.get("message_thread_id")
+            if name and tid:
+                out[name] = int(tid)
+        return out
+
+    def _resolve_node_thread_from_topics(
+        self,
+        alias: str,
+        region: str,
+        db_thread: int | None,
+        live_topics: dict[str, int],
+    ) -> int | None:
+        """在 Telegram 真实话题列表中解析节点话题（优先标题，其次 DB thread_id）."""
+        title = self._topic_title(alias, region)
+        if title in live_topics:
+            return live_topics[title]
+        if db_thread and db_thread in live_topics.values():
+            return db_thread
+        return None
+
+    def _count_nodes_missing_live_topic(self, owner: str) -> int:
+        rows = self.db.execute(
+            """SELECT COALESCE(node_alias, node_name) AS alias, region, message_thread_id
+               FROM nodes WHERE chat_id=?""",
+            (owner,),
+        )
+        if not rows:
+            return 0
+        live = self._fetch_forum_topics_map()
+        missing = 0
+        for row in rows:
+            db_thread = int(row["message_thread_id"]) if row["message_thread_id"] else None
+            if not self._resolve_node_thread_from_topics(
+                row["alias"], row["region"] or "UNKNOWN", db_thread, live
+            ):
+                missing += 1
+        return missing
+
     def _sync_agent_topic_bot(self, owner: str, node: str) -> None:
         auth = self._auth_key(owner)
         threading.Thread(
@@ -439,31 +487,45 @@ class MasterHandlers:
         alias: str | None = None,
         region: str | None = None,
         send_console: bool = True,
+        live_topics: dict[str, int] | None = None,
     ) -> int | None:
-        """创建节点话题（若缺失）、同步 Agent 绑定，可选推送控制台到群组."""
+        """创建/匹配节点话题：以 Telegram 当前话题列表为准，并回写 DB."""
         if not self.forum_mode or not self.forum_chat_id:
             return None
-        thread_id = self._node_thread_id(owner_chat_id, node)
+        if alias is None or region is None:
+            row = self.db.execute(
+                """SELECT COALESCE(node_alias, node_name) AS alias, region, message_thread_id
+                   FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1""",
+                (owner_chat_id, node),
+            )
+            if not row:
+                return None
+            alias = row[0]["alias"]
+            region = row[0]["region"] or "UNKNOWN"
+            db_thread = (
+                int(row[0]["message_thread_id"]) if row[0]["message_thread_id"] else None
+            )
+        else:
+            db_thread = self._node_thread_id(owner_chat_id, node)
+
+        topics = live_topics if live_topics is not None else self._fetch_forum_topics_map()
+        thread_id = self._resolve_node_thread_from_topics(
+            alias, region or "UNKNOWN", db_thread, topics
+        )
+
         if not thread_id:
-            if alias is None or region is None:
-                row = self.db.execute(
-                    """SELECT COALESCE(node_alias, node_name) AS alias, region
-                       FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1""",
-                    (owner_chat_id, node),
-                )
-                if not row:
-                    return None
-                alias = row[0]["alias"]
-                region = row[0]["region"] or "UNKNOWN"
             thread_id = self.tg.create_forum_topic(
-                self.forum_chat_id, f"{alias} · {region}"
+                self.forum_chat_id, self._topic_title(alias, region or "UNKNOWN")
             )
             if not thread_id:
                 return None
+
+        if thread_id != db_thread:
             self.db.execute(
                 "UPDATE nodes SET message_thread_id=? WHERE chat_id=? AND node_name=?",
                 (thread_id, owner_chat_id, node),
             )
+
         if send_console:
             panel, kb = self._manage_keyboard(owner_chat_id, node, for_topic=True)
             if kb:
@@ -965,11 +1027,7 @@ class MasterHandlers:
             row2,
         ]
         if self.forum_mode:
-            missing = self.db.scalar(
-                """SELECT COUNT(*) FROM nodes WHERE chat_id=?
-                   AND (message_thread_id IS NULL OR message_thread_id = 0)""",
-                (chat_id,),
-            ) or 0
+            missing = self._count_nodes_missing_live_topic(chat_id)
             topic_label = (
                 f"📌 补建节点话题 ({missing})" if missing else "📌 同步节点话题绑定"
             )
@@ -1564,7 +1622,7 @@ class MasterHandlers:
         self._cmd_forum_topics_rebuild(chat_id, None, auth)
 
     def _cmd_forum_topics_rebuild(self, chat_id: str, msg_id: int | None, auth: str) -> None:
-        """为缺少话题的节点批量补建 Forum Topic，并同步已有节点的 Agent 绑定."""
+        """按 Telegram 当前话题列表匹配/补建节点话题，并同步 Agent 绑定."""
         if not self.forum_mode:
             kb = [
                 [{"text": "📝 绑定群组 Chat ID", "callback_data": "forum_bind_prompt"}],
@@ -1593,7 +1651,7 @@ class MasterHandlers:
             self.tg.send_message(chat_id, "⚠️ 暂无已注册节点。")
             return
 
-        wait = f"⏳ 正在处理 {len(rows)} 个节点的话题…"
+        wait = f"⏳ 正在从 Telegram 拉取话题列表并处理 {len(rows)} 个节点…"
         if self._ctx.chat == self.forum_chat_id:
             self._forum_menu(
                 wait,
@@ -1605,33 +1663,49 @@ class MasterHandlers:
         else:
             self.tg.send_message(chat_id, wait)
 
+        live_topics = self._fetch_forum_topics_map()
+        if not live_topics and rows:
+            print(
+                "[ip-sentinel-master] getForumTopics 未返回话题，将尝试为缺失节点新建",
+                flush=True,
+            )
+
+        matched = 0
         created = 0
-        synced = 0
         failed: list[str] = []
         for row in rows:
             node = row["node_name"]
-            had_topic = bool(row["message_thread_id"])
+            alias = row["alias"]
+            region = row["region"] or "UNKNOWN"
+            db_thread = int(row["message_thread_id"]) if row["message_thread_id"] else None
+            existed_in_tg = bool(
+                self._resolve_node_thread_from_topics(alias, region, db_thread, live_topics)
+            )
+
             thread_id = self._setup_node_topic(
                 chat_id,
                 node,
                 auth,
-                alias=row["alias"],
-                region=row["region"] or "UNKNOWN",
-                send_console=not had_topic,
+                alias=alias,
+                region=region,
+                send_console=not existed_in_tg,
+                live_topics=live_topics,
             )
             if thread_id:
-                if had_topic:
-                    synced += 1
+                if existed_in_tg:
+                    matched += 1
                 else:
                     created += 1
+                    live_topics[self._topic_title(alias, region)] = thread_id
             else:
-                failed.append(row["alias"])
+                failed.append(alias)
             time.sleep(0.35)
 
         lines = [
-            "✅ **话题补建完成**",
+            "✅ **话题同步完成**",
+            f"• 匹配 Telegram 已有话题: `{matched}`",
             f"• 新建话题: `{created}`",
-            f"• 已有话题（已同步 Agent）: `{synced}`",
+            f"• 已同步 Agent 绑定: `{matched + created}`",
         ]
         if failed:
             lines.append(f"• 失败: `{', '.join(failed)}`")
