@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 JUMP_DOMAIN_MAP = {
     "com": "US",
@@ -97,6 +98,38 @@ def target_country_code(region_code: str) -> str:
     return "GB" if cc == "UK" else cc
 
 
+def _unlock_probe_value(probe: dict[str, Any] | None) -> str:
+    if not probe:
+        return "N/A"
+    status = str(probe.get("Status") or "N/A")
+    region = str(probe.get("Region") or "").strip()
+    if region and region not in status:
+        return f"{status}({region})"
+    return status
+
+
+def format_probe_status_line(
+    *,
+    jump_gl: str = "",
+    prem_gl: str = "",
+    music_gl: str = "",
+    yt: dict[str, Any] | None = None,
+    play: dict[str, Any] | None = None,
+    gemini: dict[str, Any] | None = None,
+) -> str:
+    """统一探针展示：Jump | Prem | Music | YT | Play | Gemini."""
+    return " | ".join(
+        [
+            f"Jump: {jump_gl or '无'}",
+            f"Prem: {prem_gl or '无'}",
+            f"Music: {music_gl or '无'}",
+            f"YT: {_unlock_probe_value(yt)}",
+            f"Play: {_unlock_probe_value(play)}",
+            f"Gemini: {_unlock_probe_value(gemini)}",
+        ]
+    )
+
+
 # ── 三大家：Gemini / Google Play / YouTube ────────────────────────────────────
 
 def parse_gemini_gl(html: str) -> str:
@@ -183,33 +216,33 @@ def score_geo_status(
     yt_pr_gl: str,
     yt_mu_gl: str,
     target_cc: str,
+    *,
+    media: dict[str, dict[str, str]] | None = None,
 ) -> str:
+    line = format_probe_status_line(
+        jump_gl=jump_gl,
+        prem_gl=yt_pr_gl,
+        music_gl=yt_mu_gl,
+        yt=(media or {}).get("YoutubePremium"),
+        play=(media or {}).get("GooglePlay"),
+        gemini=(media or {}).get("Gemini"),
+    )
     probes = [jump_gl, yt_pr_gl, yt_mu_gl]
     valid = [p for p in probes if p]
     if not valid:
-        return "🚨 探针无有效响应（可能被风控拦截）"
+        return f"🚨 探针无有效响应（可能被风控拦截） | {line}"
 
     cn_src = [n for n, v in [("Jump", jump_gl), ("Prem", yt_pr_gl), ("Music", yt_mu_gl)] if v == "CN"]
     if cn_src:
-        detail = (
-            f"Jump: {jump_gl or '无'} | Prem: {yt_pr_gl or '无'} | Music: {yt_mu_gl or '无'}"
-        )
         if jump_gl and jump_gl != "CN" and len(cn_src) >= 1:
-            return f"❌ CN 告警：{' / '.join(cn_src)} 判定中国大陆（Jump={jump_gl} 不采信）| {detail}"
-        return f"❌ CN 告警：{' / '.join(cn_src)} 判定中国大陆 | {detail}"
+            return (
+                f"❌ CN 告警：{' / '.join(cn_src)} 判定中国大陆（Jump={jump_gl} 不采信）| {line}"
+            )
+        return f"❌ CN 告警：{' / '.join(cn_src)} 判定中国大陆 | {line}"
 
     yt_match = yt_pr_gl == target_cc or yt_mu_gl == target_cc
     if yt_match:
         if jump_gl and jump_gl != target_cc:
-            return (
-                f"✅ 目标区域匹配 (YouTube 主探针成功, Jump 探针为 {jump_gl}) | "
-                f"Prem: {yt_pr_gl or '无'} | Music: {yt_mu_gl or '无'}"
-            )
-        return (
-            f"✅ 目标区域达成 (Jump: {jump_gl or '无'} | "
-            f"Prem: {yt_pr_gl or '无'} | Music: {yt_mu_gl or '无'})"
-        )
-    return (
-        f"⚠️ 区域发生漂移！目标 {target_cc}，实际 "
-        f"(Jump: {jump_gl or '无'} | Prem: {yt_pr_gl or '无'} | Music: {yt_mu_gl or '无'})"
-    )
+            return f"✅ 目标区域匹配 (YouTube 主探针成功, Jump 探针为 {jump_gl}) | {line}"
+        return f"✅ 目标区域达成 | {line}"
+    return f"⚠️ 区域发生漂移！目标 {target_cc} | {line}"

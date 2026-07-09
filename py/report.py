@@ -12,22 +12,22 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from config import load_config
 from geo_probe import (
-    parse_gemini_gl,
-    parse_play_gl,
-    parse_youtube_gl,
-    score_three_majors,
+    format_probe_status_line,
+    parse_jump_gl,
+    parse_yt_music_gl,
+    parse_yt_premium_gl,
+    score_geo_status,
     target_country_code,
 )
-from ip_quality_probe import probe_unlock_cn
+from ip_quality_probe import probe_unlock_cn_retry
 from log_util import log
-from network import build_curl_context, fetch_text
-from session_stats import latest_snapshot, load_sessions, summarize_google, summarize_trust
+from network import build_curl_context, fetch_headers, fetch_text
+from session_stats import conclusion_indicates_cn, latest_snapshot, load_sessions, summarize_google, summarize_trust
 from tg_util import tg_delivery, tg_push
 
 MODULE = "Report"
@@ -128,58 +128,40 @@ def _remote_agent_version() -> str:
 
 
 def _live_geo_probe(cfg: dict, ctx) -> str:
-    """实时探测三大家区域状态，同步并发解锁检测。
-
-    解锁检测（YouTube Premium / Google Play / Gemini）若判定为 CN，
-    直接返回 CN 结论，不采信可被虚拟定位影响的地理探针结果。
-    """
+    """实时探测区域状态：Jump/Prem/Music + YT/Play/Gemini 统一格式."""
     _UA = (
         "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     )
 
-    def _fetch_gemini() -> str:
-        try:
-            return parse_gemini_gl(fetch_text("https://gemini.google.com/", ctx, ua=_UA, timeout=12))
-        except Exception:
-            return ""
+    try:
+        jump_gl = parse_jump_gl(fetch_headers("http://www.google.com/", ctx, timeout=10))
+        yt_pr_gl = parse_yt_premium_gl(
+            fetch_text("https://www.youtube.com/premium", ctx, ua=_UA, timeout=12)
+        )
+        yt_mu_gl = parse_yt_music_gl(
+            fetch_text("https://music.youtube.com/", ctx, ua=_UA, timeout=12)
+        )
+        is_cn_locked, media = probe_unlock_cn_retry(ctx)
+    except Exception:
+        return "❓ 实时探针异常"
 
-    def _fetch_play() -> str:
-        try:
-            return parse_play_gl(fetch_text("https://play.google.com/store", ctx, ua=_UA, timeout=12))
-        except Exception:
-            return ""
-
-    def _fetch_yt() -> str:
-        try:
-            return parse_youtube_gl(fetch_text("https://www.youtube.com/", ctx, ua=_UA, timeout=12))
-        except Exception:
-            return ""
-
-    def _unlock() -> tuple[bool, str]:
-        try:
-            return probe_unlock_cn(ctx)
-        except Exception:
-            return False, "解锁检测异常"
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        f_g = pool.submit(_fetch_gemini)
-        f_p = pool.submit(_fetch_play)
-        f_y = pool.submit(_fetch_yt)
-        f_u = pool.submit(_unlock)
-
-        gemini_gl = f_g.result()
-        play_gl = f_p.result()
-        yt_gl = f_y.result()
-        is_cn_locked, unlock_detail = f_u.result()
-
-    tcc = target_country_code(cfg.get("REGION_CODE", "US"))
+    probe_line = format_probe_status_line(
+        jump_gl=jump_gl,
+        prem_gl=yt_pr_gl,
+        music_gl=yt_mu_gl,
+        yt=media.get("YoutubePremium"),
+        play=media.get("GooglePlay"),
+        gemini=media.get("Gemini"),
+    )
+    target_cc = target_country_code(cfg.get("REGION_CODE", "US"))
+    is_cn_locked = is_cn_locked or conclusion_indicates_cn(probe_line)
 
     if is_cn_locked:
-        return f"❌ CN 告警：解锁检测确认中国大陆 | {unlock_detail}"
+        return f"❌ CN 告警：解锁检测确认中国大陆 | {probe_line}"
 
-    return score_three_majors(gemini_gl, play_gl, yt_gl, tcc)
+    return score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc, media=media)
 
 
 def _send_telegram(cfg: dict, payload: dict) -> bool:

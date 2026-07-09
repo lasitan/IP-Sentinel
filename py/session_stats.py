@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,15 +12,38 @@ from typing import Any
 _RETENTION_DAYS = 7
 _MAX_LINES = 2000
 
+_CN_TEXT_MARKERS = (
+    "CN 告警",
+    "CN 判定",
+    "判定中国大陆",
+    "Play→CN",
+    "YT→送中",
+    "Gemini→失败",
+    "送中",
+    "google.cn",
+)
+_CN_PROBE_RE = re.compile(
+    r"(?:Jump|Prem|Music|Play|Gemini|YouTube|YT)\s*:\s*(?:CN|CHN|送中|失败)\b|"
+    r"Play:\s*失败(?:\(CN\))?|Gemini:\s*失败(?:\((?:CN|CHN)\))?|YT:\s*送中(?:\(CN\))?"
+)
+
 
 def _stats_path(cfg: dict[str, Any]) -> Path:
     install = cfg.get("INSTALL_DIR", "/opt/ip_sentinel")
     return Path(install) / "core" / "session_stats.jsonl"
 
 
+def conclusion_indicates_cn(text: str) -> bool:
+    """结论或解锁详情中是否包含 CN / 送中 / 解锁失败等信号."""
+    body = text or ""
+    if any(marker in body for marker in _CN_TEXT_MARKERS):
+        return True
+    return bool(_CN_PROBE_RE.search(body))
+
+
 def classify_outcome(conclusion: str) -> str:
     text = conclusion or ""
-    if "CN 告警" in text or "CN 判定" in text or "判定中国大陆" in text:
+    if conclusion_indicates_cn(text):
         return "fail"
     if "❌" in text:
         return "fail"
@@ -28,6 +52,19 @@ def classify_outcome(conclusion: str) -> str:
     if "✅" in text:
         return "ok"
     return "unknown"
+
+
+def google_session_outcome(row: dict[str, Any]) -> str:
+    """Google 会话归类：优先 cn_locked / 探针 GL，再解析结论文案（忽略旧 outcome 缓存）."""
+    if row.get("cn_locked") is True:
+        return "fail"
+    for key in ("jump_gl", "yt_premium_gl", "yt_music_gl"):
+        if str(row.get(key) or "").upper() == "CN":
+            return "fail"
+    unlock_detail = str(row.get("unlock_detail") or "")
+    if unlock_detail and conclusion_indicates_cn(unlock_detail):
+        return "fail"
+    return classify_outcome(str(row.get("conclusion", "")))
 
 
 def append_session(cfg: dict[str, Any], record: dict[str, Any]) -> None:
@@ -127,12 +164,23 @@ def record_google_session(
     jump_gl: str = "",
     yt_premium_gl: str = "",
     yt_music_gl: str = "",
+    cn_locked: bool = False,
+    unlock_detail: str = "",
 ) -> None:
     append_session(
         cfg,
         {
             "module": "google",
-            "outcome": classify_outcome(conclusion),
+            "outcome": google_session_outcome(
+                {
+                    "cn_locked": cn_locked,
+                    "unlock_detail": unlock_detail,
+                    "jump_gl": jump_gl,
+                    "yt_premium_gl": yt_premium_gl,
+                    "yt_music_gl": yt_music_gl,
+                    "conclusion": conclusion,
+                }
+            ),
             "conclusion": conclusion,
             "maps_visits": maps_visits,
             "earth_visits": earth_visits,
@@ -141,6 +189,8 @@ def record_google_session(
             "jump_gl": jump_gl,
             "yt_premium_gl": yt_premium_gl,
             "yt_music_gl": yt_music_gl,
+            "cn_locked": cn_locked,
+            "unlock_detail": unlock_detail,
         },
     )
 
@@ -195,7 +245,7 @@ def summarize_google(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(rows)
     ok = fail = warn = 0
     for r in rows:
-        outcome = r.get("outcome") or classify_outcome(str(r.get("conclusion", "")))
+        outcome = google_session_outcome(r)
         if outcome == "ok":
             ok += 1
         elif outcome == "fail":

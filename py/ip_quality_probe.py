@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import socket
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -19,7 +20,7 @@ _IP_API_FIELDS = (
 )
 
 
-_MEDIA_TIMEOUT = 5
+_MEDIA_TIMEOUT = 10
 
 _YT_GL_RE = re.compile(r'"INNERTUBE_CONTEXT_GL":"([A-Z]{2})"')
 _PLAY_REGION_RE = re.compile(r'"zQmIje":"([A-Z]{2})"')
@@ -447,17 +448,17 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
     }
 
 
-def probe_unlock_cn(ctx: CurlContext) -> tuple[bool, str]:
+def probe_unlock_cn(ctx: CurlContext) -> tuple[bool, dict[str, dict[str, str]]]:
     """并发探测三大服务（YouTube Premium / Google Play / Gemini）解锁状态。
 
-    返回 ``(is_cn_locked, detail)``：
+    返回 ``(is_cn_locked, media)``：
 
     - ``is_cn_locked = True``：任一服务确认 CN/受限，不应信任地理探针结果。
-    - ``detail``：各服务状态描述字符串，用于上层日志展示。
+    - ``media``：各服务原始探针结果，供 ``format_probe_status_line`` 展示。
 
     判定规则：
     - YouTube Premium 返回「送中」→ CN
-    - Google Play 区域为 CN → CN
+    - Google Play 区域为 CN / 状态失败 → CN
     - Gemini 返回「失败」（不在解锁白名单）→ CN/受限
     """
     media = _run_media_probes(ctx)
@@ -469,27 +470,36 @@ def probe_unlock_cn(ctx: CurlContext) -> tuple[bool, str]:
     cn_flags: list[str] = []
 
     if yt.get("Status") == "送中":
-        cn_flags.append(f"YT→送中")
+        cn_flags.append("YT")
 
-    if play.get("Region") == "CN":
-        cn_flags.append(f"Play→CN")
+    if play.get("Region") == "CN" or play.get("Status") == "失败":
+        cn_flags.append("Play")
 
     if gemini.get("Status") == "失败":
-        gcode = gemini.get("Region") or "?"
-        cn_flags.append(f"Gemini→失败({gcode})")
+        cn_flags.append("Gemini")
 
-    def _fmt(name: str, r: dict) -> str:
-        st = r.get("Status", "N/A")
-        rg = r.get("Region", "")
-        return f"{name}:{st}" + (f"({rg})" if rg else "")
+    return bool(cn_flags), media
 
-    detail = " | ".join([
-        _fmt("YT", yt),
-        _fmt("Play", play),
-        _fmt("Gemini", gemini),
-    ])
 
-    if cn_flags:
-        return True, f"{' / '.join(cn_flags)} ← {detail}"
-
-    return False, detail
+def probe_unlock_cn_retry(
+    ctx: CurlContext,
+    *,
+    attempts: int = 3,
+    pause_sec: float = 2.0,
+) -> tuple[bool, dict[str, dict[str, str]]]:
+    """带重试的解锁检测：浏览器会话后探针易超时，需多次探测."""
+    last_media: dict[str, dict[str, str]] = {}
+    for i in range(max(1, attempts)):
+        locked, media = probe_unlock_cn(ctx)
+        last_media = media
+        if locked:
+            return True, media
+        inconclusive = not any(
+            (media.get(name) or {}).get("Status") not in ("", "N/A", "未知")
+            for name in ("YoutubePremium", "GooglePlay", "Gemini")
+        )
+        if not inconclusive:
+            return False, media
+        if i + 1 < attempts:
+            time.sleep(pause_sec)
+    return False, last_media

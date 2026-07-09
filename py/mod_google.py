@@ -10,13 +10,14 @@ from pathlib import Path
 
 from config import require_config
 from geo_probe import (
+    format_probe_status_line,
     parse_jump_gl,
     parse_yt_music_gl,
     parse_yt_premium_gl,
     score_geo_status,
     target_country_code,
 )
-from ip_quality_probe import probe_unlock_cn
+from ip_quality_probe import probe_unlock_cn, probe_unlock_cn_retry
 from log_util import log
 from maps_browser import (
     maps_geo_enabled,
@@ -27,7 +28,7 @@ from maps_browser import (
 )
 from network import build_curl_context, fetch_headers, fetch_text, http_status
 from persona import load_lines, pick_browser_ua, pick_session_ua, random_coord, uri_encode_keyword
-from session_stats import record_google_session
+from session_stats import conclusion_indicates_cn, record_google_session
 from task_lock import acquire_browser_lock, browser_busy, release_browser_lock
 
 MODULE = "Google"
@@ -114,6 +115,7 @@ def _run_locked(cfg: dict) -> int:
         log(cfg, MODULE, level, msg)
 
     ctx = build_curl_context(cfg, _log)
+    is_cn_early, _ = probe_unlock_cn(ctx)
 
     def _run_earth_geo(lat: float, lon: float, phase: str) -> int:
         nonlocal earth_geo_visits
@@ -291,11 +293,26 @@ def _run_locked(cfg: dict) -> int:
 
     target_cc = target_country_code(cfg.get("REGION_CODE", "US"))
 
-    is_cn_locked, unlock_detail = probe_unlock_cn(ctx)
+    is_cn_locked, media = probe_unlock_cn_retry(ctx)
+    probe_line = format_probe_status_line(
+        jump_gl=jump_gl,
+        prem_gl=yt_pr_gl,
+        music_gl=yt_mu_gl,
+        yt=media.get("YoutubePremium"),
+        play=media.get("GooglePlay"),
+        gemini=media.get("Gemini"),
+    )
+    is_cn_locked = (
+        is_cn_locked or is_cn_early or conclusion_indicates_cn(probe_line)
+    )
     if is_cn_locked:
-        status = f"❌ CN 告警：解锁检测确认中国大陆 | {unlock_detail}"
+        status = f"❌ CN 告警：解锁检测确认中国大陆 | {probe_line}"
     else:
-        status = score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc)
+        status = score_geo_status(
+            jump_gl, yt_pr_gl, yt_mu_gl, target_cc, media=media
+        )
+        if conclusion_indicates_cn(status):
+            is_cn_locked = True
 
     log(cfg, MODULE, "SCORE", f"自检结论: {status}")
     log(cfg, MODULE, "INFO ", f"本次会话 Maps 虚拟定位访问: {maps_geo_visits} 次")
@@ -311,6 +328,8 @@ def _run_locked(cfg: dict) -> int:
         jump_gl=jump_gl,
         yt_premium_gl=yt_pr_gl,
         yt_music_gl=yt_mu_gl,
+        cn_locked=is_cn_locked,
+        unlock_detail=probe_line,
     )
     log(cfg, MODULE, "END  ", "========== 会话结束，释放进程 ==========")
     return 0
