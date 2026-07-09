@@ -11,6 +11,7 @@ from typing import Any
 from master.agent_client import bind_ws_hub
 from master.config import require_master_config
 from master.db import MasterDB
+from master.fleet_report import start_fleet_report_scheduler
 from master.handlers import MasterHandlers
 from master.telegram_api import TelegramAPI
 from master.ws_server import AgentWSHub
@@ -49,6 +50,7 @@ def run() -> None:
     bind_ws_hub(ws_hub)
     handlers = MasterHandlers(cfg, db, tg)
     tg.sync_bot_commands()
+    start_fleet_report_scheduler(db, tg)
 
     print(f"[ip-sentinel-master] 长轮询已启动 | WSS {MASTER_WSS_BIND}:{MASTER_WSS_PORT}", flush=True)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import fcntl
+import json
 import os
 import re
 import shlex
@@ -233,6 +234,16 @@ def execute_agent_command(path: str, params: dict[str, Any] | None = None) -> tu
         if spawn_py_script("report.py", log_module="WS"):
             return 200, "Action Accepted: report.py\n"
         return 503, "503 Service Unavailable: report.py missing\n"
+
+    if path == "/trigger_report_summary":
+        _webhook_log(cfg, "INFO ", "收到指令: 静默采集日报摘要（不推送话题）")
+        try:
+            from report import build_daily_summary
+
+            payload = build_daily_summary(cfg)
+            return 200, json.dumps(payload, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            return 500, f"500 Internal Error: {exc}\n"
 
     if path == "/trigger_quality":
         _webhook_log(cfg, "INFO ", "收到指令: IP 质量检测")

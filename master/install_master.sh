@@ -489,7 +489,7 @@ echo -e "\n[4/4] 正在下载 Master 程序 (Python)..."
 TMP_PY="${SECURE_TMP}/py_master"
 mkdir -p "${TMP_PY}/master"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/run_master.py" -o "${TMP_PY}/run_master.py"
-MASTER_PY_MODS="__init__.py config.py db.py flags.py security.py telegram_api.py agent_client.py ws_server.py forum_topics.py handlers.py bot.py __main__.py"
+MASTER_PY_MODS="__init__.py config.py db.py flags.py security.py telegram_api.py agent_client.py ws_server.py forum_topics.py fleet_report.py handlers.py bot.py __main__.py"
 for MPY in $MASTER_PY_MODS; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/master/${MPY}" -o "${TMP_PY}/master/${MPY}"
 done

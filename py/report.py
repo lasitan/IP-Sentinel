@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from config import load_config
 from geo_probe import (
@@ -164,6 +165,156 @@ def _live_geo_probe(cfg: dict, ctx) -> str:
     return score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc, media=media)
 
 
+def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
+    """生成完整日报数据（不推送 Telegram），供全节点总结采集."""
+    node_name = _node_name(cfg)
+    node_alias = str(cfg.get("NODE_ALIAS") or node_name)
+    ctx = build_curl_context(cfg)
+    current_ip = _fetch_ip(cfg, ctx)
+    _, ip_type = _fetch_isp(cfg, ctx)
+    base_cc = str(cfg.get("REGION_CODE", "US")).split("-")[0]
+    region_name = str(cfg.get("REGION_NAME", base_cc))
+    sessions = load_sessions(cfg, hours=24.0)
+
+    is_cn, media = probe_unlock_cn_retry(ctx)
+    yt = media.get("YoutubePremium", {}) or {}
+    play = media.get("GooglePlay", {}) or {}
+    gemini = media.get("Gemini", {}) or {}
+
+    out: dict[str, Any] = {
+        "node": node_name,
+        "alias": node_alias,
+        "region": base_cc,
+        "region_name": region_name,
+        "ip": current_ip,
+        "ip_type": ip_type,
+        "version": str(cfg.get("AGENT_VERSION", "?")),
+        "has_sessions": bool(sessions),
+        "unlock": {
+            "cn": bool(is_cn),
+            "yt": str(yt.get("Status") or "N/A"),
+            "play": str(play.get("Status") or "N/A"),
+            "gemini": str(gemini.get("Status") or "N/A"),
+        },
+    }
+
+    if not sessions:
+        return out
+
+    snap = latest_snapshot(sessions)
+    out["snap"] = {
+        "module": str(snap.get("module", "")),
+        "ts": str(snap.get("ts", "")),
+        "conclusion": str(snap.get("conclusion", ""))[:240],
+    }
+
+    if cfg.get("ENABLE_GOOGLE", "false").lower() == "true":
+        g = summarize_google(sessions)
+        live = _live_geo_probe(cfg, ctx)
+        out["google"] = {
+            "total": g["total"],
+            "rate": g["rate"],
+            "ok": g["ok"],
+            "fail": g["fail"],
+            "warn": g["warn"],
+            "maps_geo": g["maps_geo"],
+            "earth_geo": g["earth_geo"],
+            "search_loc": g["search_loc"],
+            "live": live[:240],
+        }
+
+    if cfg.get("ENABLE_TRUST", "false").lower() == "true":
+        t = summarize_trust(sessions)
+        out["trust"] = {
+            "total": t["total"],
+            "rate": t["rate"],
+            "ok": t["ok"],
+            "fail": t["fail"],
+        }
+
+    return out
+
+
+def build_daily_summary(cfg: dict) -> dict[str, Any]:
+    """供 Master 全节点汇总：静默跑完日报逻辑并返回 JSON."""
+    return gather_report_snapshot(cfg)
+
+
+def _format_report_message(cfg: dict, snap: dict[str, Any]) -> str:
+    """将快照格式化为 Telegram 日报正文."""
+    node_name = str(snap.get("node") or _node_name(cfg))
+    node_alias = str(snap.get("alias") or node_name)
+    base_cc = str(snap.get("region") or "US")
+    flag = FLAGS.get(base_cc, "🌐")
+    region_name = str(snap.get("region_name") or base_cc)
+
+    if not snap.get("has_sessions"):
+        msg = (
+            "🛑 **[IP-Sentinel] 告警：节点异常**\n"
+            "----------------------------\n"
+            f"📍 **节点名称**: `{node_alias}`\n"
+            "⚠️ **警告**: 过去 24 小时无会话统计记录！\n"
+            "🛠️ **建议**: 节点可能刚安装或尚未完成纠偏/净化，请手动执行一次维护。"
+        )
+    else:
+        msg = (
+            f"📊 **IP-Sentinel 每日简报 ({flag} {region_name})**\n"
+            "----------------------------\n"
+            f"📍 **节点名称**: `{node_alias}`\n"
+            f"📡 **出口 IP**: `{snap.get('ip', '')}`\n"
+            f"🛡️ **IP 属性**: {snap.get('ip_type', '—')}"
+        )
+        google = snap.get("google")
+        if isinstance(google, dict):
+            msg += (
+                f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
+                f"🚀 执行总数: {google.get('total', 0)} 次 (胜率: **{google.get('rate', '0')}%**)\n"
+                f"✅ 成功: {google.get('ok', 0)} | ❌ CN 判定: {google.get('fail', 0)} | ⚠️ 警告: {google.get('warn', 0)}\n"
+                f"📍 虚拟定位 Maps: **{google.get('maps_geo', 0)}** 次 | "
+                f"Earth: **{google.get('earth_geo', 0)}** 次 | Search: **{google.get('search_loc', 0)}** 次\n"
+                f"📡 当前实时状态: {google.get('live', '')}"
+            )
+        trust = snap.get("trust")
+        if isinstance(trust, dict):
+            msg += (
+                f"\n\n🔰 **[IP 信用净化]** (过去 24 小时)\n"
+                f"🚀 净化总数: {trust.get('total', 0)} 轮 (成功率: **{trust.get('rate', '0')}%**)\n"
+                f"✅ 成功注入: {trust.get('ok', 0)} | ❌ 访问受阻: {trust.get('fail', 0)}"
+            )
+        snap_info = snap.get("snap")
+        if isinstance(snap_info, dict):
+            msg += (
+                f"\n\n🕒 **最近执行快照 (过去 24 小时): `{snap_info.get('module', '?')}`**\n"
+                f"时间: {snap_info.get('ts') or '暂无数据'} (UTC)\n"
+                f"结论: {snap_info.get('conclusion', '')}"
+            )
+
+    local_ver = str(snap.get("version") or cfg.get("AGENT_VERSION", "未知"))
+    report_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    remote_ver = _remote_agent_version()
+    msg += f"\n----------------------------\n🛡️ **系统状态**\n⏱️ 报告时间: `{report_utc}`"
+    if remote_ver:
+        if remote_ver != local_ver:
+            msg += (
+                f"\n当前运行版本: `v{local_ver}`\n"
+                f"✨ **发现新版本**: `v{remote_ver}` (建议更新)\n"
+                "💡 *检测到新版本，建议在 Master 面板执行 OTA 升级。*"
+            )
+        else:
+            msg += (
+                f"\n当前运行版本: `v{local_ver}` (✅已是最新)\n"
+                "💡 *IP-Sentinel 持续为您守护节点。*\n"
+                "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
+            )
+    else:
+        msg += (
+            f"\n当前运行版本: `v{local_ver}`\n"
+            "💡 *IP-Sentinel 持续为您守护节点。*\n"
+            "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
+        )
+    return msg
+
+
 def _send_telegram(cfg: dict, payload: dict) -> bool:
     api_url = cfg.get("TG_API_URL", "")
     dest_chat, thread_id = tg_delivery(cfg)
@@ -199,85 +350,9 @@ def run() -> int:
             pass
     lock_file.write_text(str(now), encoding="utf-8")
 
-    node_name = _node_name(cfg)
-    node_alias = cfg.get("NODE_ALIAS") or node_name
-    ctx = build_curl_context(cfg)
-    current_ip = _fetch_ip(cfg, ctx)
-    _, ip_type = _fetch_isp(cfg, ctx)
-
-    base_cc = cfg.get("REGION_CODE", "US").split("-")[0]
-    flag = FLAGS.get(base_cc, "🌐")
-    region_name = cfg.get("REGION_NAME", base_cc)
-
-    sessions = load_sessions(cfg, hours=24.0)
-    snap = latest_snapshot(sessions)
-
-    if not sessions:
-        msg = (
-            "🛑 **[IP-Sentinel] 告警：节点异常**\n"
-            "----------------------------\n"
-            f"📍 **节点名称**: `{node_alias}`\n"
-            "⚠️ **警告**: 过去 24 小时无会话统计记录！\n"
-            "🛠️ **建议**: 节点可能刚安装或尚未完成纠偏/净化，请手动执行一次维护。"
-        )
-    else:
-        msg = (
-            f"📊 **IP-Sentinel 每日简报 ({flag} {region_name})**\n"
-            "----------------------------\n"
-            f"📍 **节点名称**: `{node_alias}`\n"
-            f"📡 **出口 IP**: `{current_ip}`\n"
-            f"🛡️ **IP 属性**: {ip_type}"
-        )
-
-        if cfg.get("ENABLE_GOOGLE", "false").lower() == "true":
-            g = summarize_google(sessions)
-            live_status = _live_geo_probe(cfg, ctx)
-            msg += (
-                f"\n\n🎯 **[Google 区域纠偏]** (过去 24 小时)\n"
-                f"🚀 执行总数: {g['total']} 次 (胜率: **{g['rate']}%**)\n"
-                f"✅ 成功: {g['ok']} | ❌ CN 判定: {g['fail']} | ⚠️ 警告: {g['warn']}\n"
-                f"📍 虚拟定位 Maps: **{g['maps_geo']}** 次 | Earth: **{g['earth_geo']}** 次 | Search: **{g['search_loc']}** 次\n"
-                f"📡 当前实时状态: {live_status}"
-            )
-
-        if cfg.get("ENABLE_TRUST", "false").lower() == "true":
-            t = summarize_trust(sessions)
-            msg += (
-                f"\n\n🔰 **[IP 信用净化]** (过去 24 小时)\n"
-                f"🚀 净化总数: {t['total']} 轮 (成功率: **{t['rate']}%**)\n"
-                f"✅ 成功注入: {t['ok']} | ❌ 访问受阻: {t['fail']}"
-            )
-
-        msg += (
-            f"\n\n🕒 **最近执行快照 (过去 24 小时): `{snap['module']}`**\n"
-            f"时间: {snap['ts'] or '暂无数据'} (UTC)\n"
-            f"结论: {snap['conclusion']}"
-        )
-
-    local_ver = cfg.get("AGENT_VERSION", "未知")
-    report_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    remote_ver = _remote_agent_version()
-
-    msg += f"\n----------------------------\n🛡️ **系统状态**\n⏱️ 报告时间: `{report_utc}`"
-    if remote_ver:
-        if remote_ver != local_ver:
-            msg += (
-                f"\n当前运行版本: `v{local_ver}`\n"
-                f"✨ **发现新版本**: `v{remote_ver}` (建议更新)\n"
-                "💡 *检测到新版本，建议在 Master 面板执行 OTA 升级。*"
-            )
-        else:
-            msg += (
-                f"\n当前运行版本: `v{local_ver}` (✅已是最新)\n"
-                "💡 *IP-Sentinel 持续为您守护节点。*\n"
-                "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
-            )
-    else:
-        msg += (
-            f"\n当前运行版本: `v{local_ver}`\n"
-            "💡 *IP-Sentinel 持续为您守护节点。*\n"
-            "*若本项目对您有帮助，欢迎在 GitHub 点 Star。*"
-        )
+    snapshot = gather_report_snapshot(cfg)
+    node_name = str(snapshot.get("node") or _node_name(cfg))
+    msg = _format_report_message(cfg, snapshot)
 
     payload = {
         "text": msg,

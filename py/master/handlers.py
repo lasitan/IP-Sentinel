@@ -1088,6 +1088,9 @@ class MasterHandlers:
         elif text == "all_reports":
             self._cmd_all_reports(chat_id, msg_id)
             handled = True
+        elif text == "fleet_summary":
+            self._cmd_fleet_summary(chat_id, msg_id)
+            handled = True
         elif text == "all_run":
             self._cmd_all_run(chat_id)
             handled = True
@@ -1194,11 +1197,13 @@ class MasterHandlers:
             {"text": "🚀 全部执行维护", "callback_data": "all_run"},
             {"text": "📊 全部生成报告", "callback_data": "all_reports"},
         ]
+        row3 = [{"text": "📋 全节点总结报告", "callback_data": "fleet_summary"}]
         if not self.official:
             row2.append({"text": "🔄 全部节点 OTA", "callback_data": "all_ota_confirm"})
         kb += [
             [{"text": "🌍 管理节点", "callback_data": "list_nodes"}],
             row2,
+            row3,
         ]
         if self.forum_mode:
             missing = self._count_nodes_missing_live_topic(chat_id)
@@ -1405,6 +1410,32 @@ class MasterHandlers:
             msg = "📢 正在向全部节点并发下发报告请求，请稍候…"
             self._show_global_menu(msg, back, msg_id)
         self._fanout_reports(chat_id)
+
+    def _cmd_fleet_summary(self, chat_id: str, msg_id: int | None = None) -> None:
+        """手动触发：全节点静默生成报告并推送总结至 General."""
+        from master.fleet_report import run_fleet_daily_report
+
+        back = [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]]
+        if not self.db.scalar("SELECT 1 FROM nodes WHERE chat_id=? LIMIT 1", (chat_id,)):
+            self._show_global_menu("⚠️ 您名下暂无已注册节点。", back, msg_id)
+            return
+
+        wait = (
+            "⏳ 正在全节点**静默生成**日报（不推送到各节点话题）并汇总…\n"
+            "完成后总结将出现在 General 或本私聊。"
+        )
+        self._show_global_menu(wait, back, msg_id)
+
+        cfg = self.cfg
+
+        def _work() -> None:
+            try:
+                run_fleet_daily_report(cfg, self.db, self.tg)
+            except Exception as exc:
+                print(f"[ip-sentinel-master] 手动全节点总结失败: {exc}", flush=True)
+                self._notify_owner(f"❌ 全节点总结失败: `{exc}`", markdown=False)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     def _cmd_all_run(self, chat_id: str) -> None:
         back = [[{"text": "🏠 返回主菜单", "callback_data": "/start"}]]
