@@ -177,7 +177,7 @@ def _live_geo_probe(cfg: dict, ctx) -> str:
     tcc = target_country_code(cfg.get("REGION_CODE", "US"))
 
     if is_cn_locked:
-        return f"❌ 解锁确认 CN，探针不采信 | {unlock_detail}"
+        return f"❌ CN 告警：解锁检测确认中国大陆 | {unlock_detail}"
 
     return score_three_majors(gemini_gl, play_gl, yt_gl, tcc)
 

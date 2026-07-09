@@ -28,7 +28,6 @@ class MasterDB:
                     chat_id TEXT,
                     node_name TEXT,
                     agent_ip TEXT,
-                    agent_port TEXT,
                     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     region TEXT DEFAULT 'UNKNOWN',
                     node_alias TEXT,

@@ -248,9 +248,13 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
         # 调度器触发时自动入库，无需人工点击按钮
         if os.environ.get("QUALITY_AUTO_SAVE") == "1":
             goog_field = raw_yt_reg if raw_yt_reg and len(raw_yt_reg) <= 4 else raw_yt_stat
-            autosvq = f"#AUTOSVQ#|{node_name}|{safe_scam}|{goog_field}|{raw_play}|{raw_gemini}"
-            _tg_post(cfg, {"text": autosvq})
-            log(cfg, MODULE, "INFO ", "自动入库消息已发送至主控")
+            try:
+                from agent_ws import queue_trend_save
+
+                queue_trend_save(node_name, safe_scam, goog_field, raw_play, raw_gemini)
+                log(cfg, MODULE, "INFO ", "趋势数据已加入 WS 自动入库队列")
+            except Exception as exc:
+                log(cfg, MODULE, "WARN ", f"自动入库队列失败: {exc}")
     else:
         log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")
     log(cfg, MODULE, "END  ", "========== IP 质量检测结束 ==========")

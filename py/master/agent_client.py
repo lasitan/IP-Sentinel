@@ -1,31 +1,32 @@
-"""向 Agent 下发 HTTPS 指令 (自签证书，等同 curl -k)."""
+"""向 Agent 下发 WebSocket 指令."""
 
 from __future__ import annotations
 
-import ssl
-import subprocess
-import urllib.error
-import urllib.request
+from typing import Any
+
+from master.ws_server import AgentWSHub
+
+_hub: AgentWSHub | None = None
 
 
-def call_agent(url: str, timeout: int = 15) -> str:
-    """优先 curl -k，回退 urllib 不校验证书."""
-    try:
-        r = subprocess.run(
-            ["curl", "-k", "-s", "--connect-timeout", "5", "-m", str(timeout), url],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5,
-            check=False,
-        )
-        if r.returncode == 0:
-            return r.stdout or ""
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+def bind_ws_hub(hub: AgentWSHub) -> None:
+    global _hub
+    _hub = hub
 
-    ctx = ssl._create_unverified_context()
-    try:
-        with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:
-            return resp.read().decode(errors="ignore")
-    except (urllib.error.URLError, TimeoutError, OSError):
+
+def call_agent(
+    owner: str,
+    node: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = 15,
+) -> str:
+    if not _hub:
         return "FAILED"
+    return _hub.send_command(owner, node, path, params, timeout=float(timeout))
+
+
+def agent_online(owner: str, node: str) -> bool:
+    if not _hub:
+        return False
+    return _hub.is_online(owner, node)

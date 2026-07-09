@@ -8,6 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "playwright>=1.49",
     "requests>=2.31",
+    "websockets>=12.0",
 ]
 
 [dependency-groups]
@@ -29,4 +30,3 @@ select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"py/webhook.py" = ["E501"]

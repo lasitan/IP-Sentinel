@@ -315,6 +315,75 @@ if [ "$UPGRADE_MODE" == "false" ]; then
         echo -e "✅ \033[32m已启用话题模式，群组 ID: ${FORUM_CHAT_ID}\033[0m"
     fi
 
+    echo -e "\n\033[36m[2.3/4] 正在检测公网 IP 与出站接口...\033[0m"
+
+    DETECT_V4=$( (curl -4 -s -m 3 api.ip.sb/ip || curl -4 -s -m 3 ifconfig.me || curl -4 -s -m 3 ipv4.icanhazip.com) 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -n 1 | tr -d '[:space:]')
+    DETECT_V6=$( (curl -6 -s -m 3 api.ip.sb/ip || curl -6 -s -m 3 ifconfig.me || curl -6 -s -m 3 ipv6.icanhazip.com) 2>/dev/null | grep -E "^[0-9a-fA-F:]+.*:" | head -n 1 | tr -d '[:space:]')
+
+    IP_OPTIONS=()
+    IP_PROTO=()
+
+    [[ -n "$DETECT_V4" ]] && { IP_OPTIONS+=("$DETECT_V4"); IP_PROTO+=("4"); }
+    [[ -n "$DETECT_V6" ]] && { IP_OPTIONS+=("$DETECT_V6"); IP_PROTO+=("6"); }
+
+    if [ ${#IP_OPTIONS[@]} -eq 0 ]; then
+        echo -e "\033[33m⚠️ 未能自动检测到公网 IP，请手动输入。\033[0m"
+        read -p "请输入 Master 对外公网 IP (v4 或 v6): " RAW_PUBLIC_IP
+        PUBLIC_IP=$(echo "$RAW_PUBLIC_IP" | tr -cd 'a-fA-F0-9.:[]')
+        [[ "$PUBLIC_IP" == *":"* ]] && IP_PREF="6" || IP_PREF="4"
+    else
+        echo "📍 检测到以下公网 IP，请选择 Master 对外地址:"
+        for i in "${!IP_OPTIONS[@]}"; do
+            num=$((i+1))
+            if [ "${IP_PROTO[$i]}" == "4" ]; then
+                echo "  $num) 🌐 IPv4: ${IP_OPTIONS[$i]} (默认选项)"
+            else
+                echo "  $num) 🌌 IPv6: ${IP_OPTIONS[$i]}"
+            fi
+        done
+        CUSTOM_OPT=$(( ${#IP_OPTIONS[@]} + 1 ))
+        echo "  $CUSTOM_OPT) ✍️ 手动指定其他 IP (适合多 IP 站群机)"
+
+        read -p "请输入选择 (默认1): " IP_CHOICE
+        IP_CHOICE=${IP_CHOICE:-1}
+
+        if [ "$IP_CHOICE" -le "${#IP_OPTIONS[@]}" ] && [ "$IP_CHOICE" -gt 0 ]; then
+            idx=$((IP_CHOICE-1))
+            PUBLIC_IP="${IP_OPTIONS[$idx]}"
+            IP_PREF="${IP_PROTO[$idx]}"
+        elif [ "$IP_CHOICE" -eq "$CUSTOM_OPT" ]; then
+            read -p "请输入 Master 对外公网 IP (v4 或 v6): " PUBLIC_IP
+            [[ "$PUBLIC_IP" == *":"* ]] && IP_PREF="6" || IP_PREF="4"
+        else
+            PUBLIC_IP="${IP_OPTIONS[0]}"
+            IP_PREF="${IP_PROTO[0]}"
+        fi
+    fi
+
+    if [[ "$PUBLIC_IP" == *":"* ]] && [[ "$PUBLIC_IP" != *"["* ]]; then
+        SAFE_PUBLIC_IP="[${PUBLIC_IP}]"
+    else
+        SAFE_PUBLIC_IP="$PUBLIC_IP"
+    fi
+
+    echo -n "正在测试出站连接 (NAT/双栈)..."
+    RAW_TEST_IP=$(echo "$SAFE_PUBLIC_IP" | tr -d '[]')
+
+    if [[ "$RAW_TEST_IP" == *":"* ]]; then
+        TEST_TARGET="https://[2606:4700:4700::1111]"
+    else
+        TEST_TARGET="https://1.1.1.1"
+    fi
+
+    if curl --interface "$RAW_TEST_IP" -sI -m 3 "$TEST_TARGET" >/dev/null 2>&1; then
+        echo -e " \033[32m✅ 已绑定网卡接口。\033[0m"
+        BIND_IP="$SAFE_PUBLIC_IP"
+    else
+        echo -e " \033[33m⚠️ 检测到 NAT 环境，将使用系统默认路由，不绑定网卡。\033[0m"
+        BIND_IP=""
+    fi
+    echo -e "\033[32m✅ Master 公网 IP: $SAFE_PUBLIC_IP\033[0m"
+
     cat > "${MASTER_DIR}/master.conf" << EOF
 # IP-Sentinel Master 本地固化配置 (v${TARGET_VERSION})
 MASTER_VERSION="$TARGET_VERSION"
@@ -325,6 +394,9 @@ IS_OFFICIAL_GATEWAY="$IS_OFFICIAL_GATEWAY"
 ENABLE_MASTER_OTA="$ENABLE_MASTER_OTA"
 FORUM_MODE="$FORUM_MODE"
 FORUM_CHAT_ID="$FORUM_CHAT_ID"
+IP_PREF="$IP_PREF"
+PUBLIC_IP="$SAFE_PUBLIC_IP"
+BIND_IP="$BIND_IP"
 EOF
 fi
 
@@ -344,6 +416,36 @@ if [ "$UPGRADE_MODE" == "true" ]; then
     if ! grep -q "^FORUM_OWNER_CHAT_ID=" "${MASTER_DIR}/master.conf"; then
         echo "FORUM_OWNER_CHAT_ID=\"\"" >> "${MASTER_DIR}/master.conf"
     fi
+    if ! grep -q "^IP_PREF=" "${MASTER_DIR}/master.conf"; then
+        DETECT_V4=$( (curl -4 -s -m 3 api.ip.sb/ip || curl -4 -s -m 3 ifconfig.me) 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -n 1 | tr -d '[:space:]')
+        DETECT_V6=$( (curl -6 -s -m 3 api.ip.sb/ip || curl -6 -s -m 3 ifconfig.me) 2>/dev/null | grep -E "^[0-9a-fA-F:]+.*:" | head -n 1 | tr -d '[:space:]')
+        if [ -n "$DETECT_V4" ]; then
+            IP_PREF="4"
+            PUBLIC_IP="$DETECT_V4"
+        elif [ -n "$DETECT_V6" ]; then
+            IP_PREF="6"
+            PUBLIC_IP="[${DETECT_V6}]"
+        else
+            IP_PREF="4"
+            PUBLIC_IP=""
+        fi
+        echo "IP_PREF=\"${IP_PREF}\"" >> "${MASTER_DIR}/master.conf"
+        echo "PUBLIC_IP=\"${PUBLIC_IP}\"" >> "${MASTER_DIR}/master.conf"
+        echo "BIND_IP=\"\"" >> "${MASTER_DIR}/master.conf"
+        echo -e "\033[33m💡 已自动补全 Master 公网 IP 配置（与 Agent 相同探测方式）。\033[0m"
+    fi
+fi
+
+# 确保 WSS 自签证书存在
+mkdir -p "${MASTER_DIR}/core"
+if [ ! -f "${MASTER_DIR}/core/ws_cert.pem" ] || [ ! -f "${MASTER_DIR}/core/ws_key.pem" ]; then
+    echo "🔐 正在生成 Master WSS 自签证书..."
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "${MASTER_DIR}/core/ws_key.pem" \
+        -out "${MASTER_DIR}/core/ws_cert.pem" \
+        -subj "/C=US/O=IP-Sentinel/CN=Master-WSS" \
+        >/dev/null 2>&1 || echo "⚠️ 证书生成失败，请确认已安装 openssl"
+    chmod 600 "${MASTER_DIR}/core/ws_key.pem" 2>/dev/null || true
 fi
 
 # ----------------------------------------------------------
@@ -355,7 +457,6 @@ CREATE TABLE IF NOT EXISTS nodes (
     chat_id TEXT,
     node_name TEXT,
     agent_ip TEXT,
-    agent_port TEXT,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     region TEXT DEFAULT 'UNKNOWN',
     node_alias TEXT,
@@ -388,16 +489,20 @@ echo -e "\n[4/4] 正在下载 Master 程序 (Python)..."
 TMP_PY="${SECURE_TMP}/py_master"
 mkdir -p "${TMP_PY}/master"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/run_master.py" -o "${TMP_PY}/run_master.py"
-MASTER_PY_MODS="__init__.py config.py db.py flags.py security.py telegram_api.py agent_client.py handlers.py bot.py __main__.py"
+MASTER_PY_MODS="__init__.py config.py db.py flags.py security.py telegram_api.py agent_client.py ws_server.py handlers.py bot.py __main__.py"
 for MPY in $MASTER_PY_MODS; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/master/${MPY}" -o "${TMP_PY}/master/${MPY}"
 done
+curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/ws_protocol.py" -o "${TMP_PY}/ws_protocol.py"
+curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/wss_constants.py" -o "${TMP_PY}/wss_constants.py"
+curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/master_public_ip.py" -o "${TMP_PY}/master_public_ip.py"
 
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/pyproject.toml" -o "${SECURE_TMP}/pyproject.toml"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/uv.lock" -o "${SECURE_TMP}/uv.lock"
 curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/.python-version" -o "${SECURE_TMP}/.python-version"
 
 if [ ! -s "${TMP_PY}/run_master.py" ] || [ ! -s "${TMP_PY}/master/bot.py" ] || \
+   [ ! -s "${TMP_PY}/ws_protocol.py" ] || \
    [ ! -s "${SECURE_TMP}/pyproject.toml" ] || [ ! -s "${SECURE_TMP}/uv.lock" ]; then
     echo -e "\033[31m❌ 下载失败：核心文件缺失，请检查网络或 GitHub Raw。\033[0m"
     echo "已中止更新，现有 Master 未被覆盖。"
@@ -486,6 +591,8 @@ else
     echo "🎉 Master 安装完成。"
     echo "Telegram Bot 已启动，等待 Agent 节点注册。"
 fi
+echo "🔐 WSS 监听端口: 19530/tcp（硬编码，请在防火墙/安全组放行）"
+echo "💡 Agent 通过 Telegram 自动获取 Master 公网地址，无需手动配置。"
 echo "========================================================"
 
 if [ "$UPGRADE_MODE" == "false" ]; then

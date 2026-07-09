@@ -31,6 +31,9 @@ def load_master_config(path: str | None = None) -> dict[str, Any]:
     cfg.setdefault("FORUM_MODE", "false")
     cfg.setdefault("FORUM_CHAT_ID", "")
     cfg.setdefault("FORUM_OWNER_CHAT_ID", "")
+    cfg.setdefault("IP_PREF", "4")
+    cfg.setdefault("PUBLIC_IP", "")
+    cfg.setdefault("BIND_IP", "")
     return cfg
 
 

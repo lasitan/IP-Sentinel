@@ -31,7 +31,7 @@ def resolve_py_script(script: str, cfg: dict | None = None) -> Path | None:
 
 
 def _python_for_install(install: str) -> str | None:
-    """优先使用项目 .venv，避免 runner/webhook 内再嵌套 uv run."""
+    """优先使用项目 .venv，避免 runner 内再嵌套 uv run."""
     venv_py = Path(install) / ".venv" / "bin" / "python"
     if venv_py.is_file():
         return str(venv_py)

@@ -8,10 +8,13 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from master.agent_client import bind_ws_hub
 from master.config import require_master_config
 from master.db import MasterDB
 from master.handlers import MasterHandlers
 from master.telegram_api import TelegramAPI
+from master.ws_server import AgentWSHub
+from wss_constants import MASTER_WSS_BIND, MASTER_WSS_PORT
 
 
 def _extract_update(
@@ -41,9 +44,12 @@ def run() -> None:
 
     db = MasterDB(cfg["DB_FILE"])
     tg = TelegramAPI(cfg["TG_TOKEN"])
+    ws_hub = AgentWSHub(db, master_dir=master_dir)
+    ws_hub.start()
+    bind_ws_hub(ws_hub)
     handlers = MasterHandlers(cfg, db, tg)
 
-    print("[ip-sentinel-master] 长轮询已启动", flush=True)
+    print(f"[ip-sentinel-master] 长轮询已启动 | WSS {MASTER_WSS_BIND}:{MASTER_WSS_PORT}", flush=True)
 
     while True:
         try:

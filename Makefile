@@ -2,7 +2,7 @@
 UV ?= uv
 
 .PHONY: sync lock lint fmt fmt-check
-.PHONY: runner google trust quality report webhook updater daemon
+.PHONY: runner google trust quality report updater daemon
 .PHONY: fetch-trends fetch-trust-urls ua-factory master
 
 sync:
@@ -34,9 +34,6 @@ quality:
 
 report:
 	$(UV) run python py/report.py
-
-webhook:
-	$(UV) run python py/webhook.py $(PORT)
 
 updater:
 	$(UV) run python py/updater.py

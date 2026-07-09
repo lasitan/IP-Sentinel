@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import threading
 import time
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -18,20 +17,20 @@ from master.agent_client import call_agent
 from master.config import save_master_config_keys
 from master.db import MasterDB
 from master.flags import get_flag
+from master_public_ip import normalize_ip_for_storage, resolve_public_ip
 from master.security import (
     alias_to_b64,
-    generate_signed_url,
     is_ssrf_ip,
     sanitize_agent_ip,
     sanitize_alias,
     sanitize_chat_id,
     sanitize_node_name,
-    sanitize_port,
     sanitize_region,
     sanitize_score,
     sanitize_status_field,
 )
 from master.telegram_api import TelegramAPI
+from wss_constants import build_master_wss_url
 
 REPO_RAW_URL = "https://raw.githubusercontent.com/lasitan/IP-Sentinel/main"
 
@@ -62,6 +61,48 @@ class MasterHandlers:
         self._ctx = _TgCtx("", "", None, None, False, "")
         self._bot_username = (tg.get_me_username() or "").lower()
         self._pending_rename: dict[int, str] = {}
+        self._master_public_ip = normalize_ip_for_storage(resolve_public_ip(self.cfg))
+        self._sync_master_wss_description()
+
+    def _refresh_master_public_ip(self) -> str:
+        ip = resolve_public_ip(self.cfg)
+        if ip:
+            self._master_public_ip = normalize_ip_for_storage(ip)
+        return self._master_public_ip
+
+    def _master_wss_reply(self) -> str:
+        ip = self._refresh_master_public_ip()
+        if not ip:
+            return ""
+        return f"#MASTER_WSS#|{ip}"
+
+    def _sync_master_wss_description(self) -> None:
+        """将 Master 公网 IP 写入 Bot Description，供 Agent 通过 getMyDescription 读取."""
+        ip = self._refresh_master_public_ip()
+        if not ip:
+            return
+        wss = build_master_wss_url(ip)
+        desc = f"IP-Sentinel Master WSS\n#MASTER_WSS#|{ip}\n{wss}"
+        self.tg.set_my_description(desc)
+
+    def _send_master_wss_reply(self, chat_id: str) -> None:
+        self._sync_master_wss_description()
+        line = self._master_wss_reply()
+        if line:
+            wss = build_master_wss_url(line.split("|", 1)[1])
+            self.tg.send_message(
+                chat_id,
+                f"{line}\n📡 Agent 请连接: `{wss}`",
+                markdown=False,
+            )
+        else:
+            self.tg.send_message(chat_id, "⚠️ Master 未能探测公网 IP，请检查出站网络。", markdown=False)
+
+    def handle_wss_lookup(self, chat_id: str, text: str) -> bool:
+        if not text.startswith("#WSS_LOOKUP#"):
+            return False
+        self._send_master_wss_reply(chat_id)
+        return True
 
     def _normalize_cmd(self, text: str) -> str:
         """解析 /start@BotName 等群组内 @ 指令."""
@@ -253,6 +294,14 @@ class MasterHandlers:
             return self._ctx.chat, self._ctx.thread
         return self._ctx.owner, None
 
+    def _menu_dest(self) -> tuple[str, int | None]:
+        """非节点专属菜单（区域列表等）的展示目标."""
+        if self.forum_mode and self.forum_chat_id:
+            if self._ctx.chat == self.forum_chat_id:
+                return self.forum_chat_id, self._ctx.thread
+            return self.forum_chat_id, None
+        return self._ctx.owner, None
+
     def _resolve_owner(self, chat_id: str, thread_id: int | None, text: str) -> str:
         if not self.forum_mode or chat_id != self.forum_chat_id:
             return chat_id
@@ -361,11 +410,10 @@ class MasterHandlers:
         *,
         sync: bool = False,
     ) -> None:
-        info = self._agent_row(owner_chat_id, node)
+        del auth
         thread = self._node_thread_id(owner_chat_id, node)
-        if not info or not thread:
+        if not thread:
             return
-        ip, port = info
         ui_id, _ = self._get_topic_ui(owner_chat_id, node)
         params: dict[str, str] = {
             "dest_chat": self.forum_chat_id,
@@ -373,12 +421,14 @@ class MasterHandlers:
         }
         if ui_id:
             params["bot_msg_id"] = str(ui_id)
-        q = urllib.parse.urlencode(params)
-        url = generate_signed_url(auth, ip, port, "/trigger_set_topic") + "&" + q
         if sync:
-            call_agent(url)
+            call_agent(owner_chat_id, node, "/trigger_set_topic", params)
         else:
-            threading.Thread(target=call_agent, args=(url,), daemon=True).start()
+            threading.Thread(
+                target=call_agent,
+                args=(owner_chat_id, node, "/trigger_set_topic", params),
+                daemon=True,
+            ).start()
 
     def _setup_node_topic(
         self,
@@ -551,7 +601,7 @@ class MasterHandlers:
         filter_ota: bool = False,
         delay: float = 0.0,  # 并发模式下不再使用，保留参数保持兼容
     ) -> None:
-        sql = "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=?"
+        sql = "SELECT node_name FROM nodes WHERE chat_id=?"
         params: tuple = (chat_id,)
         if filter_ota:
             sql += " AND enable_ota='true'"
@@ -559,8 +609,7 @@ class MasterHandlers:
         auth = self._auth_key(chat_id)
 
         def _call_one(row: dict) -> None:
-            url = generate_signed_url(auth, row["agent_ip"], row["agent_port"], path)
-            call_agent(url)
+            call_agent(chat_id, row["node_name"], path)
 
         for row in rows:
             threading.Thread(target=_call_one, args=(row,), daemon=True).start()
@@ -568,7 +617,7 @@ class MasterHandlers:
     def _fanout_reports(self, chat_id: str) -> None:
         """全部报告：每节点独立线程并发下发，预写话题消息后立即触发 report."""
         rows = self.db.execute(
-            "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=?",
+            "SELECT node_name FROM nodes WHERE chat_id=?",
             (chat_id,),
         )
         auth = self._auth_key(chat_id)
@@ -591,10 +640,7 @@ class MasterHandlers:
                     kb,
                 )
                 self._push_topic_to_agent(chat_id, node, auth, sync=True)
-            url = generate_signed_url(
-                auth, row["agent_ip"], row["agent_port"], "/trigger_report"
-            )
-            call_agent(url)
+            call_agent(chat_id, node, "/trigger_report")
 
         for row in rows:
             threading.Thread(target=_call_one, args=(row,), daemon=True).start()
@@ -635,29 +681,6 @@ class MasterHandlers:
             self.tg.edit_reply_markup(dest, msg_id, kb, message_thread_id=thread)
         return True
 
-    def handle_autosvq(self, chat_id: str, text: str) -> bool:
-        """处理 Agent 自动入库消息 #AUTOSVQ#|node|score|goog|play|gemini。"""
-        if "#AUTOSVQ#" not in text:
-            return False
-        line = next((ln for ln in text.splitlines() if "#AUTOSVQ#" in ln), text)
-        parts = line.split("|")
-        if len(parts) < 6:
-            return False
-        _, raw_node, raw_score, goog, nf, gpt = parts[:6]
-        node = sanitize_node_name(raw_node)
-        score = sanitize_score(raw_score)
-        goog = sanitize_status_field(goog)
-        nf = sanitize_status_field(nf)
-        gpt = sanitize_status_field(gpt)
-        if not node or not score:
-            return True
-        self.db.execute(
-            """INSERT INTO ip_trend_log (node_name, scam_score, goog_status, nf_status, gpt_status)
-               VALUES (?, ?, ?, ?, ?)""",
-            (node, int(score), goog, nf, gpt),
-        )
-        return True
-
     def handle_register(self, chat_id: str, text: str) -> bool:
         if "#REGISTER#" not in text:
             return False
@@ -666,40 +689,39 @@ class MasterHandlers:
         fields = line.split("|")
         n = len(fields)
         if n >= 7:
-            _, region, node, ip, port, alias, ota = fields[:7]
-        elif n == 6:
-            _, region, node, ip, port, alias = fields[:6]
-            ota = "false"
+            # 旧格式含 agent_port 字段，跳过
+            _, region, node, ip, _port, alias, ota = fields[:7]
+        elif n >= 6:
+            _, region, node, ip, alias, ota = fields[:6]
         elif n == 5:
-            _, region, node, ip, port = fields[:5]
-            alias, ota = node, "false"
+            _, region, node, ip, alias = fields[:5]
+            ota = "false"
         else:
-            _, node, ip, port = fields[:4]
+            _, node, ip, _port = fields[:4]
             region, alias, ota = "UNKNOWN", node, "false"
 
         region = sanitize_region(region)
         node = sanitize_node_name(node)
         ip = sanitize_agent_ip(ip)
-        port = sanitize_port(port)
         alias = sanitize_alias(alias) or node
         ota = re.sub(r"[^a-z]", "", (ota or "false").lower()) or "false"
 
         if is_ssrf_ip(ip):
             self.tg.send_message(chat_id, "⛔ **安全拦截**：禁止注册内网或回环 IP，防止 SSRF 攻击渗透。")
             return True
-        if not node or not ip or not port:
+        if not node or not ip:
             self.tg.send_message(chat_id, "⛔ **安全拦截**：检测到非法注册载荷，请求已拒绝。")
             return True
 
         self.db.execute(
-            """INSERT INTO nodes (chat_id, node_name, agent_ip, agent_port, last_seen,
+            """INSERT INTO nodes (chat_id, node_name, agent_ip, last_seen,
                                   region, node_alias, enable_ota)
-               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
                ON CONFLICT(chat_id, node_name) DO UPDATE SET
-                 agent_ip=excluded.agent_ip, agent_port=excluded.agent_port,
+                 agent_ip=excluded.agent_ip,
                  last_seen=CURRENT_TIMESTAMP, region=excluded.region,
                  node_alias=excluded.node_alias, enable_ota=excluded.enable_ota""",
-            (chat_id, node, ip, port, region, alias, ota),
+            (chat_id, node, ip, region, alias, ota),
         )
         auth = self._auth_key(chat_id)
         topic_note = ""
@@ -717,7 +739,12 @@ class MasterHandlers:
         )
         kb = self._region_keyboard(chat_id)
         if kb:
-            self.tg.send_ui(chat_id, "🌍 **按区域查看节点**\n请选择区域：", kb)
+            menu_body = "🌍 **按区域查看节点**\n请选择区域："
+            if self.forum_mode and self.forum_chat_id:
+                self.tg.send_ui(self.forum_chat_id, menu_body, kb)
+            else:
+                self.tg.send_ui(chat_id, menu_body, kb)
+        self._send_master_wss_reply(chat_id)
         return True
 
     def handle_rename_reply(self, text: str, reply_text: str) -> str | None:
@@ -777,6 +804,7 @@ class MasterHandlers:
             and text
             and not text.startswith("/")
             and not text.startswith("#REGISTER#")
+            and not text.startswith("#WSS_LOOKUP#")
             and not text.startswith("do_rename:")
             and not text.startswith("forum_bind:")
         ):
@@ -795,10 +823,10 @@ class MasterHandlers:
         if cb_id:
             self.tg.answer_callback(cb_id)
 
-        if self.handle_register(chat_id, text):
+        if self.handle_wss_lookup(chat_id, text):
             return
 
-        if self.handle_autosvq(chat_id, text):
+        if self.handle_register(chat_id, text):
             return
 
         auth = self._auth_key(chat_id)
@@ -1168,18 +1196,15 @@ class MasterHandlers:
             self.tg.send_message(dest, msg, message_thread_id=thread)
         self._fanout_agents(chat_id, "/trigger_run", delay=0.2)
 
-    def _agent_row(self, chat_id: str, node: str) -> tuple[str, str] | None:
-        row = self.db.execute(
-            "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1",
+    def _node_ip(self, chat_id: str, node: str) -> str | None:
+        return self.db.scalar(
+            "SELECT agent_ip FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1",
             (chat_id, node),
         )
-        if not row:
-            return None
-        return row[0]["agent_ip"], row[0]["agent_port"]
 
     def _format_agent_resp(self, resp: str, node: str, action: str) -> str:
         if resp == "FAILED":
-            return "❌ 指令下发超时或失败！为保护链路安全，已终止通信 (严禁降级为 HTTP)。"
+            return f"❌ 节点 `{node}` WSS 未连接或指令超时，请确认 Agent 在线且已通过 TG 确认 Master 公网。"
         if "503" in resp or "missing" in resp.lower():
             scripts = {
                 "google": "mod_google.py",
@@ -1211,15 +1236,21 @@ class MasterHandlers:
                 "⚠️ 请指定节点，例如: `/quality HK-1`\n或在节点列表中选择。",
             )
             return
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
             return
-        ip, port = info
-        self.tg.send_message(chat_id, f"⏳ 正在向 `{node}` ({ip}) 下发 [quality] 指令，请稍候...")
-        url = generate_signed_url(self._auth_key(chat_id), ip, port, "/trigger_quality")
-        resp = call_agent(url)
-        self.tg.send_message(chat_id, self._format_agent_resp(resp, node, "quality"))
+        dest, thread = self._reply_chat()
+        self.tg.send_message(
+            dest,
+            f"⏳ 正在向 `{node}` 下发 [quality] 指令，请稍候...",
+            message_thread_id=thread,
+        )
+        resp = call_agent(chat_id, node, "/trigger_quality")
+        self.tg.send_message(
+            dest,
+            self._format_agent_resp(resp, node, "quality"),
+            message_thread_id=thread,
+        )
 
     def _cmd_trend(self, chat_id: str, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -1232,23 +1263,25 @@ class MasterHandlers:
             return
         body = self._trend_text(chat_id, node)
         if body.startswith("⚠️"):
-            self.tg.send_message(chat_id, body)
+            dest, thread = self._menu_dest()
+            self.tg.send_message(dest, body, message_thread_id=thread)
             return
         kb = [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node}"}]]
-        self.tg.send_ui(chat_id, body, kb)
+        dest, thread = self._menu_dest()
+        self.tg.send_ui(dest, body, kb, message_thread_id=thread)
 
     def _cmd_trend_callback(self, chat_id: str, node: str, msg_id: int | None) -> None:
         node = sanitize_node_name(node)
         body = self._trend_text(chat_id, node)
-        kb: list = []
+        kb = [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node}"}]]
         if self._in_topic_flow(chat_id, node):
             self._ui_node(chat_id, node, body, kb)
             return
-        kb = [[{"text": "⚙️ 调出该节点控制台", "callback_data": f"manage:{node}"}]]
-        if msg_id:
-            self.tg.edit_ui(chat_id, msg_id, body, kb)
+        dest, thread = self._menu_dest()
+        if msg_id and dest == self._ctx.chat and self._ctx.thread == thread:
+            self.tg.edit_ui(dest, msg_id, body, kb, message_thread_id=thread)
         else:
-            self.tg.send_ui(chat_id, body, kb)
+            self.tg.send_ui(dest, body, kb, message_thread_id=thread)
 
     def _cmd_list_nodes(self, chat_id: str, msg_id: int | None = None) -> None:
         kb = self._region_keyboard(chat_id, home_btn=True)
@@ -1267,10 +1300,11 @@ class MasterHandlers:
         if self._ctx.chat == self.forum_chat_id:
             self._forum_menu(body, kb, msg_id)
             return
-        if msg_id:
-            self.tg.edit_ui(chat_id, msg_id, body, kb)
+        dest, thread = self._menu_dest()
+        if msg_id and dest == self._ctx.chat:
+            self.tg.edit_ui(dest, msg_id, body, kb, message_thread_id=thread)
         else:
-            self.tg.send_ui(chat_id, body, kb)
+            self.tg.send_ui(dest, body, kb, message_thread_id=thread)
 
     def _cmd_region(self, chat_id: str, region: str, msg_id: int | None = None) -> None:
         region = sanitize_region(region)
@@ -1310,10 +1344,11 @@ class MasterHandlers:
         if self._ctx.chat == self.forum_chat_id:
             self._forum_menu(body, kb, msg_id)
             return
-        if msg_id:
-            self.tg.edit_ui(chat_id, msg_id, body, kb)
+        dest, thread = self._menu_dest()
+        if msg_id and dest == self._ctx.chat:
+            self.tg.edit_ui(dest, msg_id, body, kb, message_thread_id=thread)
         else:
-            self.tg.send_ui(chat_id, body, kb)
+            self.tg.send_ui(dest, body, kb, message_thread_id=thread)
 
     def _cmd_manage(self, chat_id: str, node: str, msg_id: int | None) -> None:
         node = sanitize_node_name(node)
@@ -1341,15 +1376,14 @@ class MasterHandlers:
         if mod not in ("google", "trust") or state not in ("true", "false"):
             self.tg.send_message(chat_id, "❌ 无效的模块开关参数。", markdown=False)
             return
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self.tg.send_message(chat_id, f"❌ 未找到节点 `{node}`。", markdown=False)
             return
-        ip, port = info
-        url = generate_signed_url(auth, ip, port, "/trigger_toggle") + f"&mod={mod}&state={state}"
-        resp = call_agent(url)
+        resp = call_agent(
+            chat_id, node, "/trigger_toggle", {"mod": mod, "state": state}
+        )
         if "Action Accepted" not in resp:
-            self.tg.send_message(chat_id, "❌ 指令下发失败，请检查节点在线与防火墙。", markdown=False)
+            self.tg.send_message(chat_id, "❌ 指令下发失败，请确认 Agent WSS 在线。", markdown=False)
             return
         col = "enable_google" if mod == "google" else "enable_trust"
         self.db.execute(
@@ -1397,10 +1431,11 @@ class MasterHandlers:
         kb = self._region_keyboard(chat_id, home_btn=True)
         if kb:
             body = "🌍 节点列表："
-            if msg_id:
-                self.tg.edit_ui(chat_id, msg_id, body, kb)
+            dest, thread = self._menu_dest()
+            if msg_id and dest == self._ctx.chat:
+                self.tg.edit_ui(dest, msg_id, body, kb, message_thread_id=thread)
             else:
-                self.tg.send_ui(chat_id, body, kb)
+                self.tg.send_ui(dest, body, kb, message_thread_id=thread)
         else:
             self.tg.send_message(chat_id, "⚠️ 当前没有任何已注册节点。", markdown=False)
 
@@ -1425,17 +1460,16 @@ class MasterHandlers:
             return
         node = sanitize_node_name(parts[1])
         alias = sanitize_alias(parts[2], 20)
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self._msg_node(chat_id, node, "❌ 数据库中未找到该节点的通讯地址。")
             return
-        ip, port = info
         if self._in_topic_flow(chat_id, node):
             self._msg_node(chat_id, node, f"⏳ 正在向节点 `{node}` 下发重命名指令…")
         else:
             self.tg.send_message(chat_id, f"⏳ 正在向节点 `{node}` 下发重命名指令…")
-        url = generate_signed_url(auth, ip, port, "/trigger_rename") + f"&b64={alias_to_b64(alias)}"
-        resp = call_agent(url)
+        resp = call_agent(
+            chat_id, node, "/trigger_rename", {"b64": alias_to_b64(alias)}
+        )
         if resp == "FAILED":
             result = "❌ 指令下发超时！为防范劫持风险，已终止请求。"
         elif "Action Accepted" in resp:
@@ -1471,17 +1505,14 @@ class MasterHandlers:
 
     def _cmd_ota_execute(self, chat_id: str, node: str, msg_id: int | None, auth: str) -> None:
         node = sanitize_node_name(node)
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
             return
-        ip, port = info
         wait = f"⏳ 正在向 `{node}` 发送 OTA 触发报文..."
         self._msg_node(chat_id, node, wait)
-        url = generate_signed_url(auth, ip, port, "/trigger_ota")
-        resp = call_agent(url)
+        resp = call_agent(chat_id, node, "/trigger_ota")
         if resp == "FAILED":
-            result = "❌ OTA 指令下发彻底失败！链路异常或严禁使用 HTTP 降级通讯。"
+            result = "❌ OTA 指令下发失败：Agent WebSocket 未连接或超时。"
         elif "403" in resp:
             result = "⚠️ **节点拒绝执行**：该节点本地未开启 OTA 权限或运行在官方网关下！"
         else:
@@ -1623,39 +1654,34 @@ class MasterHandlers:
     def _cmd_log_refresh(self, chat_id: str, node: str, msg_id: int | None, auth: str) -> None:
         """刷新日志：Agent 直接删旧发新，无需 Master 预占位。"""
         node = sanitize_node_name(node)
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self._msg_node(chat_id, node, "❌ 数据库中未找到该节点的通讯地址。")
             return
-        ip, port = info
-        url = generate_signed_url(auth, ip, port, "/trigger_log")
-        resp = call_agent(url)
+        resp = call_agent(chat_id, node, "/trigger_log", {"msg_id": str(msg_id or "")})
         if resp == "FAILED":
             self._msg_node(chat_id, node, "❌ 日志刷新失败：节点无响应或链路异常。", markdown=False)
         elif "503" in resp or "missing" in resp.lower():
             self._msg_node(
                 chat_id,
                 node,
-                f"❌ 节点 `{node}` 缺少 webhook 模块，请 OTA 升级。",
+                f"❌ 节点 `{node}` 缺少对应模块，请 OTA 升级。",
             )
 
     def _cmd_agent_action(self, chat_id: str, text: str, msg_id: int | None, auth: str) -> None:
         action = text.split(":", 1)[0]
         node = sanitize_node_name(text.split(":", 1)[1])
-        info = self._agent_row(chat_id, node)
-        if not info:
+        if not self._node_ip(chat_id, node):
             self.tg.send_message(chat_id, "❌ 数据库中未找到该节点的通讯地址。")
             return
-        ip, port = info
+        agent_ip = self._node_ip(chat_id, node)
         # log / report / quality：Agent 异步推送结果到话题，Master 不占位，避免 "⏳" 永久卡住
         _agent_async = action in ("log", "report", "quality")
         _in_topic = self.forum_mode and bool(self._node_thread_id(chat_id, node))
         if not _agent_async or not _in_topic:
-            wait = f"⏳ 正在向 `{node}` ({info[0]}) 下发 [{action}] 指令，请稍候..."
+            wait = f"⏳ 正在向 `{node}` ({agent_ip}) 下发 [{action}] 指令，请稍候..."
             if action != "log":
                 self._msg_node(chat_id, node, wait)
-        url = generate_signed_url(auth, ip, port, f"/trigger_{action}")
-        resp = call_agent(url)
+        resp = call_agent(chat_id, node, f"/trigger_{action}")
         result = self._format_agent_resp(resp, node, action)
         # 错误直接回显；成功且 Agent 异步处理的动作不再二次 msg_node
         if result.startswith("❌") or result.startswith("⚠️"):

@@ -456,7 +456,6 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     read -p "请输入选择 [y/n] (默认n): " TG_CHOICE
     TG_TOKEN=""
     CHAT_ID=""
-    AGENT_PORT="9527"
     if [[ "$TG_CHOICE" =~ ^[Yy]$ ]]; then
         echo -e "\n请选择 Master 接入方式 (私有部署支持 OTA 远程升级):"
         echo "  1) 私有 Master (自建 Bot Token，推荐)"
@@ -504,41 +503,7 @@ if [ "$UPGRADE_MODE" == "false" ]; then
         echo -e "\033[90m   (若您的终端较老不支持点击，请手动复制: https://blog.iot-architect.com/engineering-practice/get-telegram-personal-id-via-userinfobot/ )\033[0m"
         read -p "请输入你的 Chat ID (必须准确，否则无法联控): " RAW_CHAT_ID
         CHAT_ID=$(echo "$RAW_CHAT_ID" | tr -cd '0-9-')
-        
-        echo -e "\n\033[36m[4.2/7] 正在构建 Webhook 安全通信隧道...\033[0m"
-        echo -n "🎲 正在探测可用随机端口..."
-        while true; do
-            RANDOM_PORT=$((RANDOM % 55536 + 10000))
-            if ! (ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " || netstat -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "); then
-                break
-            fi
-            echo -n "."
-        done
-        echo -e " 完成！"
-        
-        echo -e "💡 系统为您生成的推荐随机高位端口为: \033[32m$RANDOM_PORT\033[0m"
-        echo -e "\033[33m(该端口已通过本地占用校验，可直接使用)\033[0m"
-        
-        while true; do
-            read -p "请输入 Webhook 监听端口 (回车采用推荐, 或手动输入): " INPUT_PORT
-            
-            if [ -z "$INPUT_PORT" ]; then
-                AGENT_PORT="$RANDOM_PORT"
-                break
-            else
-                if [[ "$INPUT_PORT" =~ ^[0-9]+$ ]] && [ "$INPUT_PORT" -ge 1 ] && [ "$INPUT_PORT" -le 65535 ]; then
-                    if (ss -tuln 2>/dev/null | grep -q ":$INPUT_PORT " || netstat -tuln 2>/dev/null | grep -q ":$INPUT_PORT "); then
-                        echo -e "\033[31m❌ 端口 $INPUT_PORT 已被占用，请重新输入或使用推荐端口。\033[0m"
-                    else
-                        AGENT_PORT="$INPUT_PORT"
-                        break
-                    fi
-                else
-                    echo -e "\033[31m❌ 输入非法！端口范围应为 1-65535。\033[0m"
-                fi
-            fi
-        done
-        echo -e "✅ 已锁定 Webhook 通讯端口: \033[32m$AGENT_PORT\033[0m"
+        echo -e "✅ Master 公网地址将在注册后由 Telegram 自动下发（WSS 端口硬编码 19530）。"
     fi
 
     # ----------------------------------------------------------
@@ -665,7 +630,6 @@ ENABLE_TRUST="$ENABLE_TRUST"
 TG_TOKEN="$TG_TOKEN"
 TG_API_URL="$TG_API_URL"
 CHAT_ID="$CHAT_ID"
-AGENT_PORT="$AGENT_PORT"
 INSTALL_DIR="$INSTALL_DIR"
 LOG_FILE="${INSTALL_DIR}/logs/sentinel.log"
 
@@ -719,6 +683,7 @@ if [ "$UPGRADE_MODE" == "true" ]; then
         SAFE_PUBLIC_IP="${PUBLIC_IP}"
     fi
 
+
     if ! grep -q "^NODE_NAME=" "$CONFIG_FILE"; then
         TMP_HASH=$(echo "${SAFE_PUBLIC_IP:-127.0.0.1}" | md5sum | cut -c 1-4 | tr 'a-z' 'A-Z')
         NODE_NAME="$(hostname | tr -cd 'a-zA-Z0-9' | cut -c 1-10)-${TMP_HASH}"
@@ -756,7 +721,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/core/uninstall.sh" -o
 
 TMP_PY="${SECURE_TMP}/py_update"
 mkdir -p "$TMP_PY"
-PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py task_lock.py session_stats.py network.py persona.py geo_probe.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py webhook.py updater.py agent_daemon.py scheduler.py"
+PY_FILES="__init__.py config.py log_util.py tg_util.py agent_spawn.py task_lock.py session_stats.py network.py persona.py geo_probe.py ip_quality_probe.py maps_browser.py mod_google.py mod_trust.py mod_quality.py runner.py report.py updater.py agent_daemon.py scheduler.py ws_protocol.py wss_constants.py agent_commands.py agent_ws.py master_wss_resolve.py master_public_ip.py"
 for PY_FILE in $PY_FILES; do
     curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/py/${PY_FILE}" -o "${TMP_PY}/${PY_FILE}"
 done
@@ -767,7 +732,7 @@ curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/.python-version" -o "
 
 # 校验下载文件完整性，失败则不覆盖现有安装
 if [ ! -s "$TMP_UNINSTALL" ] || [ ! -s "${TMP_PY}/runner.py" ] || \
-   [ ! -s "${TMP_PY}/webhook.py" ] || [ ! -s "${TMP_PY}/agent_daemon.py" ] || \
+   [ ! -s "${TMP_PY}/agent_daemon.py" ] || \
    [ ! -s "${TMP_PY}/scheduler.py" ] || \
    [ ! -s "${TMP_PY}/ip_quality_probe.py" ] || [ ! -s "${TMP_PY}/mod_quality.py" ] || \
    [ ! -s "${TMP_PY}/tg_util.py" ] || \
@@ -784,7 +749,6 @@ if is_systemd; then
     systemctl kill --signal=SIGKILL ip-sentinel-agent-daemon.service >/dev/null 2>&1 || true
     systemctl stop ip-sentinel-runner.timer ip-sentinel-updater.timer ip-sentinel-report.timer ip-sentinel-agent-daemon.service >/dev/null 2>&1 || true
 fi
-pkill -9 -f "webhook.py" >/dev/null 2>&1 || true
 pkill -9 -f "agent_daemon.py" >/dev/null 2>&1 || true
 pkill -9 -f "uv run.*ip_sentinel" >/dev/null 2>&1 || true
 pkill -9 -f "${INSTALL_DIR}/py/" >/dev/null 2>&1 || true
@@ -904,7 +868,7 @@ EOF
 INSTALL_DIR="${INSTALL_DIR}"
 UV_BIN="${UV_BIN}"
 while true; do
-    if ! pgrep -f 'webhook.py' >/dev/null && ! pgrep -f 'agent_daemon.py' >/dev/null; then
+    if ! pgrep -f 'agent_daemon.py' >/dev/null; then
         nohup \${UV_BIN} run --directory \${INSTALL_DIR} python py/agent_daemon.py >/dev/null 2>&1 &
     fi
     sleep 60
@@ -932,7 +896,7 @@ EOF
 # ----------------------------------------------------------
 if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
     
-    REG_MSG="#REGISTER#|${REGION_CODE}|${NODE_NAME}|${SAFE_PUBLIC_IP}|${AGENT_PORT}|${NODE_ALIAS}|${ENABLE_OTA}"
+    REG_MSG="#REGISTER#|${REGION_CODE}|${NODE_NAME}|${SAFE_PUBLIC_IP}|${NODE_ALIAS}|${ENABLE_OTA}"
     
     if [ "$UPGRADE_MODE" == "true" ]; then
         OLD_VERSION=$(grep "^AGENT_VERSION=" "$CONFIG_FILE" | cut -d'"' -f2)
@@ -980,7 +944,7 @@ if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
         TEXT_MSG="✨ *IP-Sentinel 部署成功！*
 📍 区域：${REGION_NAME}
 🌐 IP：${SAFE_PUBLIC_IP}
-🔌 端口：${AGENT_PORT}
+🔌 链路：WSS (端口 19530，经 Telegram 确认 Master 公网)
 
 🔑 *请点击下方指令复制并回复给机器人：*
 \`${REG_MSG}\`"
@@ -1007,28 +971,7 @@ echo "📍 区域: $REGION_NAME"
 echo "⚙️ 定时任务: 每 20 分钟执行一次维护（日志: ${INSTALL_DIR}/logs/scheduler.log）。"
 echo "📊 日报推送: 每天 UTC 16:00（需已配置 TG）；可用 Master 手动 /trigger_report。"
 if [[ -n "$TG_TOKEN" ]]; then
-    echo "📡 Webhook 已启动 (端口: $AGENT_PORT)，已向 Master 发送注册消息。"
-    
-    FW_MSG=""
-    if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
-        FW_MSG="ufw allow $AGENT_PORT/tcp"
-    elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld | grep -qw active; then
-        FW_MSG="firewall-cmd --zone=public --add-port=$AGENT_PORT/tcp --permanent && firewall-cmd --reload"
-    elif command -v iptables >/dev/null 2>&1; then
-        if [[ "$SAFE_PUBLIC_IP" == *":"* ]]; then
-            FW_MSG="ip6tables -I INPUT -p tcp --dport $AGENT_PORT -j ACCEPT"
-        else
-            FW_MSG="iptables -I INPUT -p tcp --dport $AGENT_PORT -j ACCEPT"
-        fi
-    fi
-    
-    echo -e "\n\033[31m⚠️ 重要：节点使用公网 IP: $SAFE_PUBLIC_IP\033[0m"
-    echo -e "\033[33m请在云厂商安全组/防火墙中放行 TCP 端口 $AGENT_PORT，否则 Master 无法下发指令。\033[0m"
-    echo -e "\033[33m请勿将内网 IP 写入配置冒充公网 IP，否则远程管理将无法工作。\033[0m\n"
-    if [ -n "$FW_MSG" ]; then
-        echo "💡 检测到本地系统防火墙开启，您可以尝试执行以下命令放行本机端口 (注意: 云端安全组仍需您手动放行)："
-        echo -e "\033[36m   $FW_MSG\033[0m"
-    fi
+    echo "📡 WSS 端口硬编码 19530；Master 公网地址经 Telegram 自动确认。"
 fi
 echo "🗑️ 若未来需卸载，可重新运行本脚本选择[2]或执行: bash ${INSTALL_DIR}/core/uninstall.sh"
 echo "========================================================"

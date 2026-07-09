@@ -59,9 +59,8 @@ pkill -9 -f "tg_daemon.sh" >/dev/null 2>&1
 pkill -9 -f "agent_daemon.py" >/dev/null 2>&1
 pkill -9 -f "agent_daemon.sh" >/dev/null 2>&1
 pkill -9 -f "uv run" >/dev/null 2>&1
-pkill -9 -f "python3.*webhook.py" >/dev/null 2>&1
 pkill -9 -f "ip_sentinel/py/" >/dev/null 2>&1
-pkill -9 -f "webhook.py" >/dev/null 2>&1
+pkill -9 -f "agent_ws.py" >/dev/null 2>&1
 pkill -9 -f "runner.py" >/dev/null 2>&1
 pkill -9 -f "updater.py" >/dev/null 2>&1
 pkill -9 -f "report.py" >/dev/null 2>&1

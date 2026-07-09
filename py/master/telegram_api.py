@@ -254,3 +254,7 @@ class TelegramAPI:
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             print(f"[ip-sentinel-master] getUpdates error: {exc}", file=sys.stderr, flush=True)
             return []
+
+    def set_my_description(self, description: str) -> bool:
+        body = self._post("setMyDescription", {"description": description[:512]})
+        return bool(body.get("ok"))
