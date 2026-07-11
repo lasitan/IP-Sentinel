@@ -1,3 +1,13 @@
+kia
+açığa satış
+halk tv canlı
+çankaya belediyesi
+wetter
+giresun hava durumu
+iş kazası
+altınordu fk
+ihale
+mahkeme
 bekçi alımı
 milliyet
 ismet acar
@@ -36,7 +46,6 @@ yatırımcı
 çirkin
 wm 2026
 ak parti
-giresun hava durumu
 birgün
 füze
 ingrid alexandra
@@ -89,12 +98,3 @@ yunanistan
 fiat egea
 malatya haber
 mevzuat
-otoyol ücretleri
-savcı
-a101 aktüel
-borsa
-yapay zeka
-abdurrahman hilal
-uçak
-dolandırıcılık
-anayasa mahkemesi
