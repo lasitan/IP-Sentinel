@@ -1,3 +1,13 @@
+meteo lyon
+meteo bordeaux
+meteo reims
+toulouse
+giorgia meloni
+weer
+voici
+bourse
+bbc news
+hava durumu
 europe 1
 ascenseur
 sept à huit
@@ -5,7 +15,6 @@ meteo montpellier
 meteo poitiers
 meteo angers
 vigilance forte canicule
-weer
 tgv
 tiempo
 marion rousse porte jarretelle
@@ -36,7 +45,6 @@ election miss guyane 2026
 championnat des nations
 harry
 deux-sèvres
-hava durumu
 centre de données
 bison fute samedi 11 juillet
 lune
@@ -90,11 +98,3 @@ verdict
 resultat bac
 binance
 accident a8
-calendrier match coupe du monde 2026
-la dépêche
-yacine kafu
-jubillar
-le grau-du-roi
-héritage
-enseignant
-résultat match coupe du monde
