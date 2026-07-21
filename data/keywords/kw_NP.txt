@@ -1,3 +1,9 @@
+1
+weather today
+ballon d'or
+uefa champions league
+x
+icc cwc league 2
 nepse
 setopati
 onlinekhabar
@@ -19,13 +25,11 @@ fifa world cup stats
 michael olise
 christopher nolan the odyssey
 मौसम
-weather today
 marc cucurella
 turkish airlines
 dilip joshi
 iphone
 england vs france
-ballon d'or
 dr congo
 major league cricket
 cricinfo
@@ -94,7 +98,3 @@ shapoor zadran
 connor murphy
 luis suárez
 james rodríguez
-switzerland vs colombia
-france vs morocco
-enzo fernández
-haissem hassan
