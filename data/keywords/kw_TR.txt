@@ -1,3 +1,13 @@
+denizli ulaşım
+sondakika
+borsa
+van hava durumu
+paros
+erdal beşikçioğlu
+kayseri hava durumu
+samsun hava durumu
+nevşehir hava durumu
+ons altın
 açığa satış
 gürsel tekin
 yks tercihleri ne zaman
@@ -58,7 +68,6 @@ weer
 düzce hava durumu
 kayseri haber
 enver altaylı
-kayseri hava durumu
 çılgın sayısal loto çekiliş sonuçları
 rektör
 afyon hava durumu
@@ -89,12 +98,3 @@ adli tatil ne zaman
 ziraat
 kamudan haber
 face
-internet haber
-mynet haber
-canlı altın
-promosyon
-elektrik kesintisi
-didem arslan yılmaz
-hürriyet
-şok
-polis
