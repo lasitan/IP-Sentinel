@@ -1,3 +1,13 @@
+esra erol var mısın yok musun bilge
+samsun hava durumu
+robot
+şanlıurfa hava durumu
+mazota zam
+tuncay sonel
+konya hava durumu
+abdulkadir uraloğlu
+kırıkkale hava durumu
+harran üniversitesi personel alımı
 denizli ulaşım
 sondakika
 borsa
@@ -5,7 +15,6 @@ van hava durumu
 paros
 erdal beşikçioğlu
 kayseri hava durumu
-samsun hava durumu
 nevşehir hava durumu
 ons altın
 açığa satış
@@ -24,7 +33,6 @@ fed faiz kararı ne zaman
 peynir
 aytunç erkin
 bursa
-tuncay sonel
 petrol
 istanbul namaz vakti
 mtv ödeme
@@ -58,9 +66,7 @@ ankara elektrik kesintisi
 ani sel riski
 windy
 manisa hava durumu
-konya hava durumu
 istanbul hava durumu
-kırıkkale hava durumu
 mersin hava durumu
 cilia flores
 eskişehir hava durumu
@@ -92,9 +98,3 @@ türkiye haritası
 ösym
 bursa namaz
 sözleşme
-kbs
-tcmb
-adli tatil ne zaman
-ziraat
-kamudan haber
-face
