@@ -1,3 +1,13 @@
+mynet haber
+mohamed salah trabzonspor
+menderes belediyesi
+nefes
+bernardo silva
+van hava durumu
+jandarma
+trafik
+altın gram
+sofyan amrabat
 yatırımcı
 konhaber
 cnn türk canlı
@@ -23,7 +33,6 @@ antalya
 hazırlık maçı
 merkez bankası
 lig
-van hava durumu
 uzak şehir
 namaz vakti
 grok
@@ -89,12 +98,3 @@ esra dermancıoğlu
 zonguldak hava durumu
 adıyaman hava durumu
 adana
-emekli maaş farkları ne zaman yatacak 2026 temmuz
-ankara elektrik kesintisi
-ani sel riski
-windy
-manisa hava durumu
-istanbul hava durumu
-mersin hava durumu
-cilia flores
-eskişehir hava durumu
