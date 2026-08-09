@@ -1,3 +1,13 @@
+kocaeli hava durumu
+weather
+погода
+çılgın sayısal loto çekilişi
+izmir namaz vakitleri
+osmaniye deprem
+son dakika deprem
+kandilli rasathanesi
+antep deprem
+twitch
 meclis
 meb lgs yerlestirme sonuclari
 vergi
@@ -10,7 +20,6 @@ kayseri namaz vakitleri
 music
 cevdet yılmaz
 süper loto çekilişi
-kocaeli hava durumu
 masterchef ana kadroya giren yarışmacı
 hutbe
 konya namaz vakitleri
@@ -89,12 +98,3 @@ harran üniversitesi personel alımı
 sondakika
 borsa
 paros
-erdal beşikçioğlu
-kayseri hava durumu
-nevşehir hava durumu
-ons altın
-açığa satış
-gürsel tekin
-yks tercihleri ne zaman
-kızılcık şerbeti
-sinem dedetaş
