@@ -1,8 +1,15 @@
-cycling
 swimming
+news
+cycling
+games
+china
+tatort
+hulpdiensten
+droogte duitsland
+rafael van der vaart
+sven mislintat
 travel
 flights
-news
 inter miami - monterrey
 morgan freeman
 stroomstoring venray
@@ -17,7 +24,6 @@ luchtmacht
 youri baas
 bruce willis
 portugese oorlogsschepen kwallen
-games
 sports
 movies
 music
@@ -92,9 +98,3 @@ weather
 weer vandaag
 nirmal purja
 olieprijs
-marc-andré ter stegen
-prinses
-benzine
-rand paul
-ceuta
-portugal
