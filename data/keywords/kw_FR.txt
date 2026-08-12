@@ -1,3 +1,13 @@
+natation
+canicule prévisions
+hôpital
+plage
+hermann malonga
+kick
+mcdonald's
+football
+jeux
+rafale avion
 cyclisme pauline ferrand prevot
 gérald darmanin
 meteo nimes
@@ -12,8 +22,6 @@ pauline ferrand-prévot
 retraite
 magistrat
 deux-sèvres
-football
-plage
 house of the dragon
 sports
 h&m
@@ -33,7 +41,6 @@ ligue 1
 t
 transavia
 alexandra eala
-kick
 musique
 cancer
 marine tondelier
@@ -91,10 +98,3 @@ avion
 hausse 1er aout
 jodar
 paul biya
-données ia doctolib
-incendie var carte
-enfant
-pénurie
-incendie paris
-l'ardennais
-racing club de lens
