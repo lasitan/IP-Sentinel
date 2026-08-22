@@ -1,3 +1,13 @@
+bursa hava durumu
+son dakika haber
+ikindi namazı
+ezan
+music
+news
+events
+muhtemel aşk 11 bölüm fragmanı
+kocaelispor
+fitness
 izmir namaz vakitleri
 uzak şehir
 masterchef
@@ -21,10 +31,8 @@ atv varmısın yokmusun tuğberk
 sports
 schools
 kerem aktürkoğlu
-events
 movies
 namaz vakitleri ankara
-news
 malatya namaz vakitleri
 türkiye haritası
 ais ösym
@@ -70,7 +78,6 @@ bitcoin
 mersin hava durumu
 rize hava durumu
 giresun hava durumu
-bursa hava durumu
 malatya hava durumu
 iyi parti
 namaz vakitleri istanbul
@@ -91,10 +98,3 @@ meyve
 baraj
 izmir büyükşehir belediye başkanı
 balogun
-imsak
-elektrikli araç
-petrol
-yağış
-pakistan
-iphone 18 pro
-jojo
