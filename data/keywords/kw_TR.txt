@@ -1,3 +1,13 @@
+altın fiyatı
+1 dolar kaç tl
+taşacak bu deniz
+adana
+bursa namaz
+ezan
+istanbul namaz
+ps5
+neymar
+ferran torres
 giresun hava durumu
 icra dairesi
 emine erdoğan
@@ -11,7 +21,6 @@ fabio silva
 bursa hava durumu
 son dakika haber
 ikindi namazı
-ezan
 music
 news
 events
@@ -29,7 +38,6 @@ az önce deprem nerede oldu son dakika
 kastamonu deprem
 jobs
 en son haber
-bursa namaz
 mls
 grok
 tuğberk var mısın yok musun
@@ -46,7 +54,6 @@ namaz vakitleri ankara
 malatya namaz vakitleri
 türkiye haritası
 ais ösym
-istanbul namaz
 ömer karakaş
 işkur
 adana hava durumu
@@ -56,12 +63,10 @@ güncel
 pakistan eski başbakanı imran han
 ankara hava durumu
 ankara namaz vakitleri
-1 dolar kaç tl
 yunanistan sivrisinek virüsü
 serkay tütüncü
 claude
 masterchef demirhan
-ps5
 neres
 ufc 333
 ناشفيل ضد إنتر ميامي
@@ -93,8 +98,3 @@ namaz vakitleri istanbul
 hakan fidan
 kocaeli hava durumu
 météo
-gram altın fiyatları
-погода
-weather
-deportivo real madrid maçı
-yargıtay
