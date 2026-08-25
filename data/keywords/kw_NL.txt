@@ -1,12 +1,17 @@
+sports
+swimming
+games
+fitness
+hotels
+news
+cycling
+events
+flights
+apple
 p2000
 schools
 exercise
-news
 movies
-games
-flights
-fitness
-cycling
 netflix films thriller
 portugese voetballer overleden
 lionel messi
@@ -18,9 +23,7 @@ ps5
 robin roefs
 griekenland
 shownieuws
-swimming
 pizza
-sports
 music
 benjamin netanyahu
 iga świątek
@@ -95,6 +98,3 @@ joy beune
 tesselaar atletiek
 vallende sterren vannacht
 nightmare alley
-112 enschede
-travel
-ns abonnement
