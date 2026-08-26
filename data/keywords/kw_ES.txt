@@ -1,9 +1,15 @@
-deportes
 noticias
-museos
-música
-cine
 empleos
+cine
+playa
+música
+nike
+independiente del valle - tolima
+betfair
+cruzeiro - atlético mineiro
+infiltrada
+deportes
+museos
 juegos
 talleres - rosario central
 tornado francia
@@ -33,13 +39,11 @@ fútbol
 cuponazo
 hoteles
 vuelos
-playa
 bancos
 multa
 copa libertadores
 cienciano
 botafogo
-betfair
 libertadores
 ted lasso
 fernando alonso
@@ -94,7 +98,3 @@ santos
 twins - phillies
 islam makhachev
 garnacho
-a
-australia vs bangladesh
-inter miami
-bolívar - são paulo
