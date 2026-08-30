@@ -491,6 +491,23 @@
               ]
             }
           ]
+        },
+        {
+          "id": "BG",
+          "name": "Bulgaria (保加利亚)",
+          "keyword_file": "kw_BG.txt",
+          "states": [
+            {
+              "id": "Default",
+              "name": "Default State",
+              "cities": [
+                {
+                  "id": "Sofia",
+                  "name": "Sofia (索非亚)"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
