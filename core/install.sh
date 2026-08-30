@@ -349,7 +349,10 @@ echo -e "\033[32m✅ 基础环境检测通过。\033[0m"
 # 下载区域地图并引导配置
 # ----------------------------------------------------------
 echo -e "\n[2/7] 正在下载区域地图 (map.json)..."
-curl -fsSL --connect-timeout 10 --retry 3 "${REPO_RAW_URL}/data/map.json" -o "${SECURE_TMP}/map.json"
+MAP_CACHE_BUST="$(date +%s)"
+curl -fsSL --connect-timeout 10 --retry 3 \
+    -H "Cache-Control: no-cache" \
+    "${REPO_RAW_URL}/data/map.json?cb=${MAP_CACHE_BUST}" -o "${SECURE_TMP}/map.json"
 if [ ! -s "${SECURE_TMP}/map.json" ]; then
     echo -e "\033[31m❌ 拉取全球地图失败！请检查网络或 GitHub 仓库地址。\033[0m"
     exit 1
