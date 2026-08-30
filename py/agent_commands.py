@@ -160,7 +160,34 @@ exit 1
     return runner
 
 
-def _launch_ota_runner(runner: str, cfg: dict[str, str]) -> bool:
+def _write_uninstall_runner(cfg: dict[str, str], repo_url: str) -> str:
+    install = cfg.get("INSTALL_DIR", INSTALL_DIR)
+    runner = f"/tmp/ip_sentinel_agent_uninstall_{os.getpid()}_{int(time.time())}.sh"
+    script = f"""#!/bin/bash
+set -u
+INSTALL_DIR={shlex.quote(install)}
+REPO_RAW_URL={shlex.quote(repo_url)}
+UNINSTALL_TMP="/tmp/ip_sentinel_uninstall_$$.sh"
+cleanup() {{
+    rm -f "$UNINSTALL_TMP" "$0"
+}}
+trap cleanup EXIT
+if curl -fsSL --connect-timeout 10 --retry 3 "$REPO_RAW_URL/core/uninstall.sh" -o "$UNINSTALL_TMP" && \\
+   [ -s "$UNINSTALL_TMP" ] && bash -n "$UNINSTALL_TMP"; then
+    exec bash "$UNINSTALL_TMP"
+fi
+if [ -x "$INSTALL_DIR/core/uninstall.sh" ]; then
+    exec bash "$INSTALL_DIR/core/uninstall.sh"
+fi
+echo "uninstall script not found"
+exit 1
+"""
+    Path(runner).write_text(script, encoding="utf-8")
+    os.chmod(runner, 0o700)
+    return runner
+
+
+def _launch_background_runner(runner: str, cfg: dict[str, str], unit_prefix: str) -> bool:
     env = {
         **os.environ,
         "IP_SENTINEL_INSTALL_DIR": cfg.get("INSTALL_DIR", INSTALL_DIR),
@@ -168,7 +195,7 @@ def _launch_ota_runner(runner: str, cfg: dict[str, str]) -> bool:
     }
     systemd_run = shutil.which("systemd-run")
     if systemd_run and os.path.isdir("/run/systemd/system"):
-        unit = f"ip-sentinel-agent-ota-{os.getpid()}-{int(time.time())}"
+        unit = f"ip-sentinel-agent-{unit_prefix}-{os.getpid()}-{int(time.time())}"
         try:
             result = subprocess.run(
                 [systemd_run, "--quiet", "--no-block", "--unit", unit, "bash", runner],
@@ -198,6 +225,14 @@ def _launch_ota_runner(runner: str, cfg: dict[str, str]) -> bool:
         return True
     except OSError:
         return False
+
+
+def _launch_ota_runner(runner: str, cfg: dict[str, str]) -> bool:
+    return _launch_background_runner(runner, cfg, "ota")
+
+
+def _launch_uninstall_runner(runner: str, cfg: dict[str, str]) -> bool:
+    return _launch_background_runner(runner, cfg, "uninstall")
 
 
 def execute_agent_command(path: str, params: dict[str, Any] | None = None) -> tuple[int, str]:
@@ -326,6 +361,16 @@ def execute_agent_command(path: str, params: dict[str, Any] | None = None) -> tu
             if not _launch_ota_runner(runner, cfg):
                 return 500, "500 Internal Error: OTA launcher failed\n"
             return 200, "Action Accepted: trigger_ota\n"
+        except Exception as exc:
+            return 500, f"500 Internal Error: {exc}\n"
+
+    if path == "/trigger_uninstall":
+        try:
+            _webhook_log(cfg, "INFO ", "收到指令: 远程完全卸载")
+            runner = _write_uninstall_runner(cfg, _ota_repo_url(cfg))
+            if not _launch_uninstall_runner(runner, cfg):
+                return 500, "500 Internal Error: uninstall launcher failed\n"
+            return 200, "Action Accepted: trigger_uninstall\n"
         except Exception as exc:
             return 500, f"500 Internal Error: {exc}\n"
 

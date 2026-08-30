@@ -1660,20 +1660,32 @@ class MasterHandlers:
         if not ok:
             self.tg.send_message(chat_id, "⛔ **安全拦截**：销毁失败。目标节点不存在或您无权越权操作！")
             return
+        remote_status = ""
+        if self._node_ip(chat_id, node):
+            resp = call_agent(chat_id, node, "/trigger_uninstall", timeout=20)
+            if resp == "FAILED":
+                remote_status = "\n⚠️ 远端离线，未能下发卸载；已仅从主控移除注册。"
+            elif "Action Accepted" in resp:
+                remote_status = "\n✅ 已向节点下发完全卸载（含系统包与 apt 缓存）。"
+            elif "404" in resp:
+                remote_status = "\n⚠️ 节点 Agent 版本过旧，不支持远程卸载；请 SSH 执行 uninstall.sh。"
+            else:
+                remote_status = f"\n⚠️ 远端卸载响应: `{resp[:120].strip()}`"
         thread = self._node_thread_id(chat_id, node)
         ui_id, _ = self._get_topic_ui(chat_id, node)
+        deleted_msg = f"🗑️ 已删除节点 `{node}` 及其历史记录。{remote_status}"
         if thread and ui_id and self.forum_chat_id:
             self.tg.replace_message(
                 self.forum_chat_id,
                 ui_id,
-                f"🗑️ 已删除节点 `{node}` 及其历史记录。",
+                deleted_msg,
                 message_thread_id=thread,
             )
         self.db.execute("DELETE FROM nodes WHERE chat_id=? AND node_name=?", (chat_id, node))
         self.db.execute("DELETE FROM ip_trend_log WHERE node_name=?", (node,))
         if self._ctx.in_forum:
             return
-        self.tg.send_message(chat_id, f"🗑️ 已删除节点 `{node}` 及其历史记录。")
+        self.tg.send_message(chat_id, deleted_msg)
         kb = self._region_keyboard(chat_id, home_btn=True)
         if kb:
             body = "🌍 节点列表："

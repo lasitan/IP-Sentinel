@@ -66,6 +66,60 @@ INSTALL_DIR="/opt/ip_sentinel"
 CONFIG_FILE="${INSTALL_DIR}/config.conf"
 UV_PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 UV_BIN="/usr/local/bin/uv"
+INSTALL_MANIFEST="${INSTALL_DIR}/.install_manifest"
+
+manifest_init() {
+    mkdir -p "${INSTALL_DIR}" 2>/dev/null || true
+    if [ ! -f "$INSTALL_MANIFEST" ]; then
+        echo "# IP-Sentinel install manifest" > "$INSTALL_MANIFEST"
+    fi
+}
+
+manifest_set() {
+    local key="$1" val="$2"
+    manifest_init
+    if ! grep -q "^${key}=" "$INSTALL_MANIFEST" 2>/dev/null; then
+        echo "${key}=${val}" >> "$INSTALL_MANIFEST"
+    fi
+}
+
+manifest_add_pkg() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return
+    manifest_init
+    grep -qxF "PKG=${pkg}" "$INSTALL_MANIFEST" 2>/dev/null && return
+    echo "PKG=${pkg}" >> "$INSTALL_MANIFEST"
+}
+
+_pkg_list_snapshot() {
+    if command -v dpkg-query >/dev/null 2>&1; then
+        dpkg-query -W -f='${Package}\n' 2>/dev/null | sort -u
+    elif command -v rpm >/dev/null 2>&1; then
+        rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u
+    elif command -v apk >/dev/null 2>&1; then
+        apk info -q 2>/dev/null | sort -u
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Qq 2>/dev/null | sort -u
+    fi
+}
+
+_pkg_record_new_packages() {
+    local before_file="$1"
+    [ -f "$before_file" ] || return
+    comm -13 "$before_file" <(_pkg_list_snapshot) 2>/dev/null | while read -r pkg; do
+        manifest_add_pkg "$pkg"
+    done
+}
+
+_detect_pkg_mgr() {
+    if command -v apt-get >/dev/null 2>&1; then echo apt
+    elif command -v dnf >/dev/null 2>&1; then echo dnf
+    elif command -v yum >/dev/null 2>&1; then echo yum
+    elif command -v microdnf >/dev/null 2>&1; then echo microdnf
+    elif command -v apk >/dev/null 2>&1; then echo apk
+    elif command -v pacman >/dev/null 2>&1; then echo pacman
+    fi
+}
 
 # 安装脚本 JSON/Telegram 辅助（标准库，不依赖 jq）
 _ips_pyjson() {
@@ -171,6 +225,7 @@ ensure_uv() {
         exit 1
     fi
     UV_BIN="$(command -v uv)"
+    manifest_set UV_BIN "$UV_BIN"
     echo -e "\033[32m✅ uv 已就绪: $($UV_BIN --version 2>/dev/null | head -n1)\033[0m"
 }
 
@@ -188,13 +243,17 @@ uv_sync_project() {
 
 install_playwright_chromium() {
     local root="$1"
+    local pw_pkg_before="${SECURE_TMP}/pw_pkg_before.list"
     echo "⏳ 正在安装 Playwright Chromium（Google Maps 定位必需）..."
+    _pkg_list_snapshot > "$pw_pkg_before" 2>/dev/null || true
     (cd "$root" && "$UV_BIN" run playwright install-deps chromium) 2>/dev/null || true
     if ! (cd "$root" && "$UV_BIN" run playwright install chromium); then
         echo -e "\033[31m❌ Playwright Chromium 安装失败。\033[0m"
         echo -e "💡 请手动执行: cd ${root} && ${UV_BIN} run playwright install-deps && ${UV_BIN} run playwright install chromium"
         return 1
     fi
+    manifest_set PLAYWRIGHT 1
+    _pkg_record_new_packages "$pw_pkg_before"
     echo -e "\033[32m✅ Playwright Chromium 已就绪。\033[0m"
     return 0
 }
@@ -222,6 +281,9 @@ done
 
 if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
     echo "⏳ 发现缺失依赖: ${MISSING_CMDS[*]}，正在尝试自动补齐..."
+    PKG_SNAP="${SECURE_TMP}/pkg_before.list"
+    _pkg_list_snapshot > "$PKG_SNAP" 2>/dev/null || true
+    manifest_set PKG_MGR "$(_detect_pkg_mgr)"
     
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y >/dev/null 2>&1
@@ -267,6 +329,9 @@ if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
         exit 1
     fi
     
+    _pkg_record_new_packages "$PKG_SNAP"
+    rm -f "$PKG_SNAP" 2>/dev/null
+    
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "\033[31m❌ 致命错误：核心命令 '$cmd' 仍未找到！\033[0m"
@@ -276,6 +341,7 @@ if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
         fi
     done
 fi
+manifest_set PKG_MGR "$(_detect_pkg_mgr)"
 ensure_uv
 echo -e "\033[32m✅ 基础环境检测通过。\033[0m"
 
