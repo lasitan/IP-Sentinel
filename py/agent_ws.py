@@ -60,7 +60,8 @@ class AgentWSClient:
     def __init__(self) -> None:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._force_lookup = False
+        self._ever_connected = False
+        self._refresh_desc = False
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="agent-wss")
@@ -82,17 +83,25 @@ class AgentWSClient:
                 continue
 
             node = _node_name(cfg)
-            url = request_master_wss_via_tg(cfg, node, force=self._force_lookup)
-            self._force_lookup = False
+            # 首次启动允许 TG 通知；之后重连一律静默（不向聊天发 #WSS_LOOKUP#）
+            allow_notify = not self._ever_connected
+            url = request_master_wss_via_tg(
+                cfg,
+                node,
+                force=self._refresh_desc or not self._ever_connected,
+                allow_notify=allow_notify,
+            )
+            self._refresh_desc = False
             if not url:
                 self._stop.wait(30)
                 continue
 
             try:
                 asyncio.run(self._session(cfg, url, chat_id))
+                self._ever_connected = True
             except Exception as exc:
-                log(cfg, MODULE, "WARN ", f"WSS 会话异常: {exc}，将重新通过 TG 确认 Master 公网")
-                self._force_lookup = True
+                log(cfg, MODULE, "WARN ", f"WSS 会话异常: {exc}，将静默重连")
+                self._refresh_desc = True
             if not self._stop.is_set():
                 self._stop.wait(_RECONNECT_SEC)
 

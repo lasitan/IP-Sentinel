@@ -103,10 +103,15 @@ class MasterHandlers:
         else:
             self.tg.send_message(chat_id, "⚠️ Master 未能探测公网 IP，请检查出站网络。", markdown=False)
 
-    def handle_wss_lookup(self, chat_id: str, text: str) -> bool:
+    def handle_wss_lookup(self, chat_id: str, text: str, user_msg_id: int | None = None) -> bool:
         if not text.startswith("#WSS_LOOKUP#"):
             return False
-        self._send_master_wss_reply(chat_id)
+        # 静默刷新 Bot Description，不向聊天发通知（避免 WSS 重连刷屏）
+        self._sync_master_wss_description()
+        if user_msg_id:
+            self.tg.delete_message(
+                self._ctx.chat, user_msg_id, message_thread_id=self._ctx.thread
+            )
         return True
 
     def _normalize_cmd(self, text: str) -> str:
@@ -1043,7 +1048,7 @@ class MasterHandlers:
         if cb_id:
             self.tg.answer_callback(cb_id)
 
-        if self.handle_wss_lookup(chat_id, text):
+        if self.handle_wss_lookup(chat_id, text, user_msg_id=user_msg_id):
             return
 
         if self.handle_register(chat_id, text):

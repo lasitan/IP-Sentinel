@@ -75,12 +75,18 @@ def _notify_master_refresh(cfg: dict, node: str) -> None:
         pass
 
 
-def request_master_wss_via_tg(cfg: dict, node: str, *, force: bool = False) -> str:
+def request_master_wss_via_tg(
+    cfg: dict,
+    node: str,
+    *,
+    force: bool = False,
+    allow_notify: bool = True,
+) -> str:
     """
     通过 Telegram 确认 Master 公网 WSS（端口硬编码 19530）：
     1. 读本地缓存 MASTER_PUBLIC_IP
     2. 读 Bot getMyDescription（Master 启动/注册时写入）
-    3. 发送 #WSS_LOOKUP# 触发 Master 刷新后重试
+    3. （可选）发送 #WSS_LOOKUP# 触发 Master 刷新后重试——重连时应关闭以免刷屏
     """
     if not force:
         cached = _cached_ip(cfg)
@@ -95,6 +101,15 @@ def request_master_wss_via_tg(cfg: dict, node: str, *, force: bool = False) -> s
         url = build_master_wss_url(ip)
         log(cfg, MODULE, "INFO ", f"从 Bot Description 确认 Master WSS: {url}")
         return url
+
+    # 重连静默：不向聊天发 #WSS_LOOKUP#，回退缓存
+    if not allow_notify:
+        cached = _cached_ip(cfg)
+        if cached:
+            log(cfg, MODULE, "INFO ", "静默重连：使用本地缓存 Master 公网")
+            return build_master_wss_url(cached)
+        log(cfg, MODULE, "WARN ", "静默重连：无 Description/缓存，稍后重试")
+        return ""
 
     _notify_master_refresh(cfg, node)
     for _ in range(6):
