@@ -165,6 +165,45 @@ def _live_geo_probe(cfg: dict, ctx) -> str:
     return score_geo_status(jump_gl, yt_pr_gl, yt_mu_gl, target_cc, media=media)
 
 
+def _media_entry(media: dict[str, Any], key: str) -> dict[str, Any]:
+    val = media.get(key) if isinstance(media, dict) else None
+    return val if isinstance(val, dict) else {}
+
+
+def _trend_fields_from_media(media: dict[str, Any]) -> tuple[str, str, str]:
+    """从解锁探针结果提取趋势图字段（YT / Play / Gemini）。"""
+    yt = _media_entry(media, "YoutubePremium")
+    play = _media_entry(media, "GooglePlay")
+    gemini = _media_entry(media, "Gemini")
+
+    yt_reg = str(yt.get("Region") or "").strip()
+    yt_stat = str(yt.get("Status") or "")
+    goog = yt_reg if yt_reg and len(yt_reg) <= 4 else (yt_stat or "未知")
+
+    play_reg = str(play.get("Region") or "").strip()
+    play_stat = str(play.get("Status") or "Unknown")
+    play_field = play_reg or play_stat
+
+    gemini_reg = str(gemini.get("Region") or "").strip()
+    gemini_stat = str(gemini.get("Status") or "未知")
+    gemini_field = gemini_reg or gemini_stat
+
+    return goog, play_field, gemini_field
+
+
+def _save_pollution_trend(cfg: dict, media: dict[str, Any]) -> None:
+    """将日报/总结中的解锁探针结果写入污染趋势图。"""
+    node_name = _node_name(cfg)
+    goog, play, gemini = _trend_fields_from_media(media)
+    try:
+        from agent_ws import queue_trend_save
+
+        queue_trend_save(node_name, "0", goog, play, gemini)
+        log(cfg, MODULE, "INFO ", f"污染趋势已入库 YT={goog} Play={play} Gemini={gemini}")
+    except Exception as exc:
+        log(cfg, MODULE, "WARN ", f"污染趋势入库失败: {exc}")
+
+
 def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
     """生成完整日报数据（不推送 Telegram），供全节点总结采集."""
     node_name = _node_name(cfg)
@@ -177,9 +216,9 @@ def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
     sessions = load_sessions(cfg, hours=24.0)
 
     is_cn, media = probe_unlock_cn_retry(ctx)
-    yt = media.get("YoutubePremium") if isinstance(media.get("YoutubePremium"), dict) else {}
-    play = media.get("GooglePlay") if isinstance(media.get("GooglePlay"), dict) else {}
-    gemini = media.get("Gemini") if isinstance(media.get("Gemini"), dict) else {}
+    yt = _media_entry(media, "YoutubePremium")
+    play = _media_entry(media, "GooglePlay")
+    gemini = _media_entry(media, "Gemini")
 
     out: dict[str, Any] = {
         "node": node_name,
@@ -195,7 +234,11 @@ def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
             "yt": str(yt.get("Status") or "N/A"),
             "play": str(play.get("Status") or "N/A"),
             "gemini": str(gemini.get("Status") or "N/A"),
+            "yt_region": str(yt.get("Region") or ""),
+            "play_region": str(play.get("Region") or ""),
+            "gemini_region": str(gemini.get("Region") or ""),
         },
+        "_media": media,
     }
 
     if not sessions:
@@ -237,7 +280,11 @@ def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
 
 def build_daily_summary(cfg: dict) -> dict[str, Any]:
     """供 Master 全节点汇总：静默跑完日报逻辑并返回 JSON."""
-    return gather_report_snapshot(cfg)
+    snap = gather_report_snapshot(cfg)
+    media = snap.pop("_media", {}) or {}
+    if isinstance(media, dict) and media:
+        _save_pollution_trend(cfg, media)
+    return snap
 
 
 def _format_report_message(cfg: dict, snap: dict[str, Any]) -> str:
@@ -351,6 +398,9 @@ def run() -> int:
     lock_file.write_text(str(now), encoding="utf-8")
 
     snapshot = gather_report_snapshot(cfg)
+    media = snapshot.pop("_media", {}) or {}
+    if isinstance(media, dict) and media:
+        _save_pollution_trend(cfg, media)
     node_name = str(snapshot.get("node") or _node_name(cfg))
     msg = _format_report_message(cfg, snapshot)
 
