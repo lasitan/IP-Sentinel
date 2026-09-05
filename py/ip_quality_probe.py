@@ -11,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from network import CurlContext, build_curl_context, fetch_text
-from persona import DEFAULT_UA
 
 LogFn = Callable[[str, str], None]
 
@@ -106,6 +105,11 @@ def _log(log_fn: LogFn | None, level: str, msg: str) -> None:
         log_fn(level, msg)
 
 
+def _as_dict(val: Any) -> dict[str, Any]:
+    """API 偶发返回字符串/列表；仅在确为 dict 时继续嵌套取值。"""
+    return val if isinstance(val, dict) else {}
+
+
 def _fetch_ip(ctx: CurlContext) -> str:
     for url in ("https://api.ip.sb/ip", "https://ifconfig.me", "https://api.ipify.org"):
         body = fetch_text(url, ctx, timeout=8).strip()
@@ -125,6 +129,8 @@ def _fetch_ip_api(ip: str, ctx: CurlContext) -> dict[str, Any]:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
             continue
         if data.get("status") == "success":
             return data
@@ -147,94 +153,6 @@ def _fetch_ip_api(ip: str, ctx: CurlContext) -> dict[str, Any]:
 def _asn_number(as_field: str) -> str:
     m = re.search(r"AS(\d+)", str(as_field or ""), re.I)
     return m.group(1) if m else ""
-
-
-def _score_int(val: Any) -> str:
-    if val is None or str(val).strip().lower() in ("", "null", "none"):
-        return "N/A"
-    try:
-        n = int(float(val))
-        if 0 <= n <= 100:
-            return str(n)
-    except (TypeError, ValueError):
-        pass
-    return "N/A"
-
-
-def _fetch_checkplace(ip: str, ctx: CurlContext, db: str) -> dict[str, Any] | None:
-    raw = fetch_text(f"https://ipinfo.check.place/{ip}?db={db}", ctx, timeout=14)
-    if not raw or not raw.lstrip().startswith("{"):
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-
-
-def _fetch_ipapi_is_risk(ip: str, ctx: CurlContext) -> str:
-    raw = fetch_text(f"https://api.ipapi.is/?q={ip}", ctx, timeout=12)
-    if not raw:
-        return "N/A"
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return "N/A"
-    scoretext = (data.get("company") or {}).get("abuser_score") or ""
-    m = re.match(r"([\d.]+)", str(scoretext))
-    if not m:
-        return "N/A"
-    try:
-        pct = float(m.group(1)) * 100
-        return f"{pct:.1f}%"
-    except ValueError:
-        return "N/A"
-
-
-def _fetch_risk_scores(ip: str, ctx: CurlContext, log_fn: LogFn | None = None) -> dict[str, str]:
-    """多库风险分（对齐 xykt / ipinfo.check.place）."""
-    scores: dict[str, str] = {
-        "SCAMALYTICS": "N/A",
-        "AbuseIPDB": "N/A",
-        "IPQS": "N/A",
-        "IP2LOCATION": "N/A",
-        "ipapi": "N/A",
-    }
-
-    scam_data = _fetch_checkplace(ip, ctx, "scamalytics")
-    if scam_data and "scamalytics" in scam_data:
-        scores["SCAMALYTICS"] = _score_int(
-            (scam_data.get("scamalytics") or {}).get("scamalytics_score")
-        )
-
-    abuse_data = _fetch_checkplace(ip, ctx, "abuseipdb")
-    if abuse_data:
-        scores["AbuseIPDB"] = _score_int((abuse_data.get("data") or {}).get("abuseConfidenceScore"))
-
-    ipqs_data = _fetch_checkplace(ip, ctx, "ipqualityscore")
-    if ipqs_data:
-        scores["IPQS"] = _score_int(ipqs_data.get("fraud_score"))
-
-    ip2l_data = _fetch_checkplace(ip, ctx, "ip2location")
-    if ip2l_data:
-        scores["IP2LOCATION"] = _score_int(ip2l_data.get("fraud_score"))
-
-    scores["ipapi"] = _fetch_ipapi_is_risk(ip, ctx)
-
-    if scam_data is None and abuse_data is None:
-        _log(log_fn, "WARN ", "ipinfo.check.place 无响应，尝试 Scamalytics 网页回退…")
-        html = fetch_text(f"https://scamalytics.com/ip/{ip}", ctx, ua=DEFAULT_UA, timeout=20)
-        for pat in (
-            r"Fraud Score:\s*(\d{1,3})",
-            r"fraud-score[^>]*>\s*(\d{1,3})",
-        ):
-            m = re.search(pat, html or "", re.I)
-            if m:
-                scores["SCAMALYTICS"] = m.group(1)
-                break
-
-    ok = sum(1 for v in scores.values() if v != "N/A")
-    _log(log_fn, "INFO ", f"Python 探针: 风险库返回 {ok}/5 项有效分数")
-    return scores
 
 
 def _check_port25(cfg: dict[str, Any]) -> bool | None:
@@ -412,9 +330,6 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
 
     usage = "机房" if hosting else ("移动" if mobile else "家庭宽带")
 
-    _log(log_fn, "INFO ", "Python 探针: 多库风险评分…")
-    score_map = _fetch_risk_scores(ip, ctx, log_fn)
-
     _log(
         log_fn,
         "INFO ",
@@ -435,7 +350,6 @@ def run_quality_probe(cfg: dict[str, Any], log_fn: LogFn | None = None) -> dict[
             "Type": ip_type,
         },
         "Type": {"Usage": {"IPinfo": usage}},
-        "Score": score_map,
         "Factor": {
             "Proxy": {"ip-api": proxy, "hosting": hosting},
             "VPN": {"ip-api": proxy},
@@ -463,9 +377,9 @@ def probe_unlock_cn(ctx: CurlContext) -> tuple[bool, dict[str, dict[str, str]]]:
     """
     media = _run_media_probes(ctx)
 
-    yt = media.get("YoutubePremium", {})
-    play = media.get("GooglePlay", {})
-    gemini = media.get("Gemini", {})
+    yt = _as_dict(media.get("YoutubePremium"))
+    play = _as_dict(media.get("GooglePlay"))
+    gemini = _as_dict(media.get("Gemini"))
 
     cn_flags: list[str] = []
 
@@ -495,7 +409,7 @@ def probe_unlock_cn_retry(
         if locked:
             return True, media
         inconclusive = not any(
-            (media.get(name) or {}).get("Status") not in ("", "N/A", "未知")
+            _as_dict(media.get(name)).get("Status") not in ("", "N/A", "未知")
             for name in ("YoutubePremium", "GooglePlay", "Gemini")
         )
         if not inconclusive:

@@ -36,18 +36,26 @@ def _valid_iso(cc: str) -> str:
     return ""
 
 
+def _as_dict(val: object) -> dict:
+    return val if isinstance(val, dict) else {}
+
+
+def _media_entry(data: dict, key: str) -> dict:
+    return _as_dict(_as_dict(data.get("Media")).get(key))
+
+
 def _resolve_media_iso(data: dict, key: str) -> str:
-    media = data.get("Media", {}).get(key, {})
+    media = _media_entry(data, key)
     reg = _valid_iso(media.get("Region") or "")
     if reg:
         return reg
     if key == "Gemini":
         return "--"
-    return _valid_iso(data.get("ipCountry", "")) or "--"
+    return _valid_iso(str(data.get("ipCountry") or "")) or "--"
 
 
 def _format_media_iso(data: dict, key: str) -> str:
-    media = data.get("Media", {}).get(key, {})
+    media = _media_entry(data, key)
     status = media.get("Status", "未知")
     iso = escape_markdown(_resolve_media_iso(data, key))
 
@@ -67,10 +75,10 @@ def _format_media_iso(data: dict, key: str) -> str:
 
 
 def _google_cn_warning(data: dict) -> str:
-    yt = data.get("Media", {}).get("YoutubePremium", {})
+    yt = _media_entry(data, "YoutubePremium")
     if yt.get("Status") == "送中":
         return "\n🚨 **YouTube 判定为送中（google.cn）。**\n"
-    play = data.get("Media", {}).get("GooglePlay", {})
+    play = _media_entry(data, "GooglePlay")
     if play.get("Status") == "失败" and _valid_iso(play.get("Region", "")) == "CN":
         return "\n🚨 **Google Play 判定为中国大陆。**\n"
     return ""
@@ -93,24 +101,6 @@ def _tg_post(cfg: dict, payload: dict) -> bool:
     return False
 
 
-def _format_score_label(name: str, val: str) -> str:
-    if val == "N/A":
-        return f"• **{name}:** `N/A`"
-    if name == "IPAPI 风险率" or str(val).endswith("%"):
-        return f"• **{name}:** `{escape_markdown(val)}`"
-    return f"• **{name}:** `{escape_markdown(val)}/100`"
-
-
-def _scores_footnote(scam: str, abuse: str, ipqs: str, ip2l: str) -> str:
-    core = (scam, abuse, ipqs, ip2l)
-    ok = sum(1 for v in core if v != "N/A")
-    if ok == 0:
-        return "\n_⚠️ 风险数据库均未返回有效分数（出站可能被限或 API 不可用）。_"
-    if ok <= 2:
-        return "\n_⚠️ 部分风险库未返回数据，仅供参考。_"
-    return ""
-
-
 def _port25_label(mail: dict) -> str:
     port25 = mail.get("Port25")
     if port25 is None:
@@ -121,7 +111,6 @@ def _port25_label(mail: dict) -> str:
 def _auto_save_trend(
     cfg: dict,
     node_name: str,
-    safe_scam: str,
     raw_yt_reg: str,
     raw_yt_stat: str,
     raw_play: str,
@@ -131,7 +120,8 @@ def _auto_save_trend(
     try:
         from agent_ws import queue_trend_save
 
-        queue_trend_save(node_name, safe_scam, goog_field, raw_play, raw_gemini)
+        # scam_score 字段保留入库兼容，固定写 0（已取消 IP 评分）
+        queue_trend_save(node_name, "0", goog_field, raw_play, raw_gemini)
         log(cfg, MODULE, "INFO ", "趋势数据已自动入库")
     except Exception as exc:
         log(cfg, MODULE, "WARN ", f"自动入库失败: {exc}")
@@ -147,7 +137,7 @@ def _run_inner(cfg: dict) -> int:
     log(cfg, MODULE, "INFO ", "执行探针: Python ip_quality_probe（jiudu 解锁逻辑）")
     data = run_quality_probe(cfg, _probe_log)
 
-    if not data or not data.get("Head", {}).get("IP"):
+    if not data or not _as_dict(data.get("Head")).get("IP"):
         log(cfg, MODULE, "ERROR", "探针未返回有效结果")
         _tg_post(
             cfg,
@@ -164,67 +154,40 @@ def _run_inner(cfg: dict) -> int:
         log(cfg, MODULE, "END  ", "========== IP 质量检测结束 (无有效结果) ==========")
         return 1
 
-    head = data.get("Head", {})
+    head = _as_dict(data.get("Head"))
     ip_addr = head.get("IP", "")
-
-    scores = data.get("Score", {})
-    scam = scores.get("SCAMALYTICS") or "N/A"
-    abuse = scores.get("AbuseIPDB") or "N/A"
-    ipqs = scores.get("IPQS") or "N/A"
-    ip2l = scores.get("IP2LOCATION") or "N/A"
-    fraud = scores.get("ipapi") or "N/A"
-
-    def _clean(v):
-        return "N/A" if v in (None, "null", "") else v
-
-    scam, abuse, ipqs, ip2l, fraud = map(_clean, (scam, abuse, ipqs, ip2l, fraud))
 
     unlock_lines = "\n".join(
         f"• **{label}:** {_format_media_iso(data, key)}"
         for key, label in _UNLOCK_LINES
     )
 
-    yt = data.get("Media", {}).get("YoutubePremium", {})
+    yt = _media_entry(data, "YoutubePremium")
     raw_yt_reg = yt.get("Region", "")
     raw_yt_stat = yt.get("Status", "")
 
-    play_m = data.get("Media", {}).get("GooglePlay", {})
+    play_m = _media_entry(data, "GooglePlay")
     raw_play = play_m.get("Region", "") or play_m.get("Status", "Unknown")
 
-    gemini_m = data.get("Media", {}).get("Gemini", {})
+    gemini_m = _media_entry(data, "Gemini")
     raw_gemini = gemini_m.get("Region", "") or gemini_m.get("Status", "未知")
 
     warning = _google_cn_warning(data)
 
-    mail = data.get("Mail", {})
+    mail = _as_dict(data.get("Mail"))
     p25 = _port25_label(mail)
-    dns = mail.get("DNSBlacklist", {})
+    dns = _as_dict(mail.get("DNSBlacklist"))
     dns_b = escape_markdown(str(dns.get("Blacklisted", "0")))
     dns_m = escape_markdown(str(dns.get("Marked", "0")))
 
     local_ver = escape_markdown(cfg.get("AGENT_VERSION", "未知"))
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    link_ip = (cfg.get("PUBLIC_IP") or ip_addr or "").strip("[]")
     safe_ip = escape_markdown(ip_addr)
     safe_alias = escape_markdown(node_alias)
-
-    score_lines = "\n".join(
-        [
-            _format_score_label("Scamalytics", str(scam)),
-            _format_score_label("AbuseIPDB", str(abuse)),
-            _format_score_label("IPQS", str(ipqs)),
-            _format_score_label("IP2Location", str(ip2l)),
-            _format_score_label("IPAPI 风险率", str(fraud)),
-        ]
-    )
-    score_note = _scores_footnote(str(scam), str(abuse), str(ipqs), str(ip2l))
 
     report = f"""🎯 *IP-Sentinel IP 质量报告*
 📍 节点：`{safe_alias}`
 🌐 地址：`{safe_ip}`{warning}
-
-*🛡️ 风险评分 (越低越好)*
-{score_lines}{score_note}
 
 *🎬 核心业务解锁* _(ISO 3166-1 · jiudu)_
 {unlock_lines}
@@ -233,11 +196,8 @@ def _run_inner(cfg: dict) -> int:
 • **25 端口出站:** {p25}
 • **DNS 污染库:** 严重 `{dns_b}` | 轻微 `{dns_m}`
 
-_👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{link_ip})_
-
 ⏱️ `{now}` | ⚙️ `v{local_ver}`"""
 
-    safe_scam = re.sub(r"[^0-9]", "", str(scam)) or "0"
     node_name = cfg.get("NODE_NAME", "Unknown")
 
     payload = {
@@ -251,18 +211,18 @@ _👉 [🔍 详细信用图谱直达 (Scamalytics)](https://scamalytics.com/ip/{
         },
     }
     if _tg_post(cfg, payload):
-        log(cfg, MODULE, "SCORE", f"检测完成 IP={ip_addr}")
+        log(cfg, MODULE, "INFO ", f"检测完成 IP={ip_addr}")
         record_quality_session(
             cfg,
             ip=ip_addr,
-            scam_score=str(scam),
+            scam_score="0",
             youtube_region=raw_yt_reg,
             youtube_status=raw_yt_stat,
             play_status=raw_play,
             gemini_status=raw_gemini,
         )
         _auto_save_trend(
-            cfg, node_name, safe_scam, raw_yt_reg, raw_yt_stat, raw_play, raw_gemini
+            cfg, node_name, raw_yt_reg, raw_yt_stat, raw_play, raw_gemini
         )
     else:
         log(cfg, MODULE, "ERROR", "质量报告生成成功但 Telegram 推送失败")

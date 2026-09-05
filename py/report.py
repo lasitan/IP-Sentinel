@@ -177,9 +177,9 @@ def gather_report_snapshot(cfg: dict) -> dict[str, Any]:
     sessions = load_sessions(cfg, hours=24.0)
 
     is_cn, media = probe_unlock_cn_retry(ctx)
-    yt = media.get("YoutubePremium", {}) or {}
-    play = media.get("GooglePlay", {}) or {}
-    gemini = media.get("Gemini", {}) or {}
+    yt = media.get("YoutubePremium") if isinstance(media.get("YoutubePremium"), dict) else {}
+    play = media.get("GooglePlay") if isinstance(media.get("GooglePlay"), dict) else {}
+    gemini = media.get("Gemini") if isinstance(media.get("Gemini"), dict) else {}
 
     out: dict[str, Any] = {
         "node": node_name,

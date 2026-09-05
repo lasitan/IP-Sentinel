@@ -801,23 +801,16 @@ class MasterHandlers:
         ) or node
         lines = [
             f"📈 *[{alias}] 历史记录 (近 15 次)*\n",
-            "时间(本地)  | 风险 | YT区域 | Play | Gemini",
+            "时间(本地)  | YT区域 | Play | Gemini",
             "-------------------------------------------",
         ]
         for row in rows:
-            score = row["scam_score"] or 0
             goog = row["goog_status"] or "未知"
             nf = row["nf_status"] or "未知"
             gpt = row["gpt_status"] or "未知"
             short = (row["t"] or "")[5:16]
-            if score <= 20:
-                emj = "🟢"
-            elif score <= 60:
-                emj = "🟡"
-            else:
-                emj = "🔴"
-            lines.append(f"`{short}` | {emj}`{score}` | `{goog}` | `{nf}` | `{gpt}`")
-        lines.append("\n_💡 风险分 >60 可能触发验证码；Google 显示 CN 表示被判定为中国大陆。_")
+            lines.append(f"`{short}` | `{goog}` | `{nf}` | `{gpt}`")
+        lines.append("\n_💡 Google 显示 CN 表示被判定为中国大陆。_")
         return "\n".join(lines)
 
     def _fanout_agents(

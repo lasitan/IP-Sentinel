@@ -99,7 +99,7 @@ def target_country_code(region_code: str) -> str:
 
 
 def _unlock_probe_value(probe: dict[str, Any] | None) -> str:
-    if not probe:
+    if not isinstance(probe, dict):
         return "N/A"
     status = str(probe.get("Status") or "N/A")
     region = str(probe.get("Region") or "").strip()
