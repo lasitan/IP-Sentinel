@@ -1,3 +1,6 @@
+ufc
+arsenal
+search
 play store
 roblox
 cpl
@@ -63,7 +66,6 @@ apple airpods 5
 santos vs cruzeiro
 inter miami vs nashville
 sunderland a.f.c. vs arsenal f.c. standings
-ufc
 real madrid vs rayo vallecano standings
 real madrid vs rayo vallecano
 iphone 18 pro max apple
@@ -96,5 +98,3 @@ orangutans
 chicago vs inter miami
 supreme court
 muse
-iphone 18
-borussia dortmund vs villarreal cf standings
