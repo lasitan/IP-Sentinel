@@ -1,3 +1,13 @@
+indirim
+arnaud denis
+zehra güneş
+mebbis
+tolga kalender
+orkun kökçü
+başkan
+eskişehir hava durumu
+manisa hava durumu
+okullar tatil mi
 hürriyet
 trt haber canlı
 mynet
@@ -6,7 +16,6 @@ cnn
 manisa
 ntv canlı
 cnn türk
-mebbis
 hamdi ulukaya
 bist 100
 ziraat yatırım
@@ -36,7 +45,6 @@ gazeteler
 emre alkin
 bim
 millwall west ham
-indirim
 okan kurt
 yusuf dikeç
 gazze
@@ -90,11 +98,3 @@ masterchef eleme potaya kim gitti
 mehmet davutoğlu
 savcı
 kandilli
-türkiye kadın millî voleybol takımı
-ermenistan
-rüşvet
-gürsel erol
-rahmi koç
-deyverson
-türkiye petrolleri anonim ortaklığı
-müge anlı 11 eylül 2026
