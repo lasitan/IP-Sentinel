@@ -13,9 +13,27 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+      - name: Check version.txt vs git tag
+        run: |
+          set -euo pipefail
+          test -f version.txt
+          MASTER_VERSION="$(awk -F= '/^MASTER_VERSION=/{print $2; exit}' version.txt | tr -d '\r" '"'"'')"
+          AGENT_VERSION="$(awk -F= '/^AGENT_VERSION=/{print $2; exit}' version.txt | tr -d '\r" '"'"'')"
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "tag=${GITHUB_REF_NAME} MASTER_VERSION=${MASTER_VERSION} AGENT_VERSION=${AGENT_VERSION}"
+          if [ -z "$MASTER_VERSION" ] || [ -z "$AGENT_VERSION" ]; then
+            echo "version.txt incomplete" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "$MASTER_VERSION" ]; then
+            echo "git tag v${TAG} must equal MASTER_VERSION=${MASTER_VERSION} in version.txt" >&2
+            exit 1
+          fi
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
       - name: Build deb packages
+        env:
+          REQUIRE_TAG_MATCH: "1"
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           chmod +x scripts/build-deb.sh
@@ -23,5 +41,10 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/deb/*.deb
+          body: |
+            Versions from `version.txt`:
+            - Master: see MASTER_VERSION
+            - Agent: see AGENT_VERSION
+            Tag must match MASTER_VERSION (`vX.Y.Z`).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

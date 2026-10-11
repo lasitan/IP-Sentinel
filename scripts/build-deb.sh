@@ -1,14 +1,61 @@
 #!/usr/bin/env bash
-# Build ip-sentinel-master / ip-sentinel-agent .deb packages (requires Go + nfpm).
+# Build ip-sentinel-master / ip-sentinel-agent .deb packages from version.txt.
+# Requires: Go, nfpm. Versions are ONLY taken from version.txt (no silent defaults).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-MASTER_VERSION="$(awk -F= '/^MASTER_VERSION=/{print $2; exit}' version.txt | tr -d '\r')"
-AGENT_VERSION="$(awk -F= '/^AGENT_VERSION=/{print $2; exit}' version.txt | tr -d '\r')"
-MASTER_VERSION="${MASTER_VERSION:-5.0.0}"
-AGENT_VERSION="${AGENT_VERSION:-5.0.0}"
+VERSION_FILE="${ROOT}/version.txt"
+if [ ! -f "$VERSION_FILE" ]; then
+  echo "错误: 缺少 version.txt（${VERSION_FILE}）" >&2
+  exit 1
+fi
+
+MASTER_VERSION="$(awk -F= '/^MASTER_VERSION=/{print $2; exit}' "$VERSION_FILE" | tr -d '\r" '"'"'')"
+AGENT_VERSION="$(awk -F= '/^AGENT_VERSION=/{print $2; exit}' "$VERSION_FILE" | tr -d '\r" '"'"'')"
+
+semver_ok() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.+-]+)?$ ]]
+}
+
+if [ -z "$MASTER_VERSION" ] || [ -z "$AGENT_VERSION" ]; then
+  echo "错误: version.txt 必须包含 MASTER_VERSION 与 AGENT_VERSION" >&2
+  echo "当前: MASTER_VERSION='${MASTER_VERSION}' AGENT_VERSION='${AGENT_VERSION}'" >&2
+  exit 1
+fi
+if ! semver_ok "$MASTER_VERSION"; then
+  echo "错误: MASTER_VERSION 非法: ${MASTER_VERSION}" >&2
+  exit 1
+fi
+if ! semver_ok "$AGENT_VERSION"; then
+  echo "错误: AGENT_VERSION 非法: ${AGENT_VERSION}" >&2
+  exit 1
+fi
+
+echo "version.txt => MASTER_VERSION=${MASTER_VERSION} AGENT_VERSION=${AGENT_VERSION}"
+
+# Optional: when releasing from a git tag (CI), require tag matches version.txt.
+# Prefer MASTER_VERSION; if AGENT differs, tag must still equal MASTER and we warn,
+# or set REQUIRE_AGENT_TAG=1 to also require AGENT == MASTER.
+if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
+  TAG_VER="${GITHUB_REF_NAME#v}"
+  if [ "$TAG_VER" != "$MASTER_VERSION" ]; then
+    echo "错误: git tag (${GITHUB_REF_NAME}) 与 version.txt MASTER_VERSION (v${MASTER_VERSION}) 不一致" >&2
+    exit 1
+  fi
+  if [ "$AGENT_VERSION" != "$MASTER_VERSION" ]; then
+    if [ "${REQUIRE_AGENT_TAG:-0}" = "1" ]; then
+      echo "错误: AGENT_VERSION (${AGENT_VERSION}) 与 MASTER_VERSION (${MASTER_VERSION}) 不一致" >&2
+      exit 1
+    fi
+    echo "警告: AGENT_VERSION (${AGENT_VERSION}) 与 tag/MASTER (${MASTER_VERSION}) 不同，将分别打入各自 deb 版本号"
+  fi
+  echo "tag 校验通过: ${GITHUB_REF_NAME} <-> MASTER_VERSION=${MASTER_VERSION}"
+elif [ "${REQUIRE_TAG_MATCH:-0}" = "1" ]; then
+  echo "错误: REQUIRE_TAG_MATCH=1 但未检测到 GITHUB_REF_NAME=v* 标签" >&2
+  exit 1
+fi
 
 ARCHS="${ARCHS:-amd64 arm64}"
 OUT_DIR="${OUT_DIR:-dist/deb}"
@@ -54,5 +101,5 @@ for ARCH in $ARCHS; do
   rm -rf "$TMP"
 done
 
-echo "Done. Packages in ${OUT_DIR}/"
+echo "Done. Packages in ${OUT_DIR}/ (from version.txt)"
 ls -la "$OUT_DIR"

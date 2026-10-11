@@ -13,7 +13,7 @@ Telegram 频道：[IP-Sentinel Matrix](https://t.me/IP_Sentinel_Matrix)
 - **引导轮询 → Webhook**：仅有 Token 时用 `getUpdates` 引导配置；`/nginx` 部署反代后自动 `setWebhook`。
 - **加强保活**：传输层 Ping 10s + 应用层 ping/pong 10s/15s，并刷新 `last_seen`。
 - **节点发现**：安装时写入 `MASTER_BASE_URL`（不在聊天中预览 WSS 地址）。
-- **deb 发包**：Release 提供 `.deb`；安装脚本检测 Debian/Ubuntu 环境后 `dpkg` 安装。
+- **deb 发包**：版本以 [`version.txt`](version.txt) 为准；打 `v{MASTER_VERSION}` tag 后 CI 校验并发布 `.deb`；安装脚本同样读取 `version.txt` 后 `dpkg` 安装。
 - **Workers 部署面**：可选 Cloudflare Workers + Durable Objects + KV（见 [`deploy/workers`](deploy/workers)）。
 
 ## 目录结构

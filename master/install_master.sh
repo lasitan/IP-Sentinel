@@ -47,11 +47,19 @@ case "$arch" in
   *) echo "错误: 不支持的架构: $arch"; exit 1 ;;
 esac
 
-MASTER_VERSION="$(curl -fsSL "$VERSION_URL" | awk -F= '/MASTER_VERSION/{print $2; exit}' | tr -d '\r')"
-MASTER_VERSION="${MASTER_VERSION:-5.0.0}"
+VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
+  echo "错误: 无法读取 ${VERSION_URL}"
+  exit 1
+}
+MASTER_VERSION="$(printf '%s\n' "$VERSION_BODY" | awk -F= '/^MASTER_VERSION=/{print $2; exit}' | tr -d '\r" '"'"'')"
+if [ -z "$MASTER_VERSION" ] || ! [[ "$MASTER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  echo "错误: version.txt 中 MASTER_VERSION 无效: '${MASTER_VERSION}'"
+  exit 1
+fi
 TAG="v${MASTER_VERSION}"
 DEB_NAME="ip-sentinel-master_${MASTER_VERSION}_${DEB_ARCH}.deb"
 URL="${RELEASE_BASE}/${TAG}/${DEB_NAME}"
+echo "version.txt => MASTER_VERSION=${MASTER_VERSION} (tag ${TAG})"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

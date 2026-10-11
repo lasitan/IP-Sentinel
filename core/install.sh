@@ -49,11 +49,25 @@ case "$arch" in
   *) echo "错误: 不支持的架构: $arch"; exit 1 ;;
 esac
 
-AGENT_VERSION="$(curl -fsSL "$VERSION_URL" | awk -F= '/AGENT_VERSION/{print $2; exit}' | tr -d '\r')"
-AGENT_VERSION="${AGENT_VERSION:-5.0.0}"
-TAG="v${AGENT_VERSION}"
+VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
+  echo "错误: 无法读取 ${VERSION_URL}"
+  exit 1
+}
+MASTER_VERSION="$(printf '%s\n' "$VERSION_BODY" | awk -F= '/^MASTER_VERSION=/{print $2; exit}' | tr -d '\r" '"'"'')"
+AGENT_VERSION="$(printf '%s\n' "$VERSION_BODY" | awk -F= '/^AGENT_VERSION=/{print $2; exit}' | tr -d '\r" '"'"'')"
+if [ -z "$AGENT_VERSION" ] || ! [[ "$AGENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  echo "错误: version.txt 中 AGENT_VERSION 无效: '${AGENT_VERSION}'"
+  exit 1
+fi
+if [ -z "$MASTER_VERSION" ] || ! [[ "$MASTER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  echo "错误: version.txt 中 MASTER_VERSION 无效: '${MASTER_VERSION}'"
+  exit 1
+fi
+# Release 资产挂在 MASTER_VERSION 对应 tag 下；deb 文件名使用 AGENT_VERSION
+TAG="v${MASTER_VERSION}"
 DEB_NAME="ip-sentinel-agent_${AGENT_VERSION}_${DEB_ARCH}.deb"
 URL="${RELEASE_BASE}/${TAG}/${DEB_NAME}"
+echo "version.txt => MASTER_VERSION=${MASTER_VERSION} AGENT_VERSION=${AGENT_VERSION} (tag ${TAG})"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
