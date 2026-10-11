@@ -1,0 +1,42 @@
+name: ip-sentinel-master
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: IP-Sentinel <noreply@localhost>
+description: IP-Sentinel Master control plane
+vendor: IP-Sentinel
+homepage: https://github.com/lasitan/IP-Sentinel
+license: MIT
+
+contents:
+  - src: dist/bin/ip-sentinel-master
+    dst: /usr/bin/ip-sentinel-master
+    file_info:
+      mode: 0755
+  - src: packaging/master/ip-sentinel-master.service
+    dst: /lib/systemd/system/ip-sentinel-master.service
+    type: config
+  - src: packaging/master/master.conf.example
+    dst: /etc/ip-sentinel-master/master.conf.example
+    type: config|noreplace
+  - dst: /var/lib/ip-sentinel-master
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/lib/ip-sentinel-master/core
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/lib/ip-sentinel-master/logs
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /etc/ip-sentinel-master
+    type: dir
+    file_info:
+      mode: 0755
+
+scripts:
+  postinstall: packaging/master/postinst.sh

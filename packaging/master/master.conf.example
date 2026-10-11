@@ -1,0 +1,8 @@
+TG_TOKEN=""
+MASTER_DIR="/var/lib/ip-sentinel-master"
+DB_FILE="/var/lib/ip-sentinel-master/sentinel.db"
+MASTER_VERSION="5.0.0"
+LISTEN_ADDR="127.0.0.1:19530"
+TG_MODE="polling"
+IS_OFFICIAL_GATEWAY="false"
+ENABLE_MASTER_OTA="false"

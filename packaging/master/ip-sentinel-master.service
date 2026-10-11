@@ -1,0 +1,15 @@
+[Unit]
+Description=IP-Sentinel Master (control plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=IP_SENTINEL_MASTER_CONFIG=/etc/ip-sentinel-master/master.conf
+ExecStart=/usr/bin/ip-sentinel-master
+Restart=always
+RestartSec=3
+WorkingDirectory=/var/lib/ip-sentinel-master
+
+[Install]
+WantedBy=multi-user.target

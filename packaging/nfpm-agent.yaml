@@ -1,0 +1,50 @@
+name: ip-sentinel-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: IP-Sentinel <noreply@localhost>
+description: IP-Sentinel Agent node daemon
+vendor: IP-Sentinel
+homepage: https://github.com/lasitan/IP-Sentinel
+license: MIT
+
+contents:
+  - src: dist/bin/ip-sentinel-agent
+    dst: /usr/bin/ip-sentinel-agent
+    file_info:
+      mode: 0755
+  - src: packaging/agent/ip-sentinel-agent.service
+    dst: /lib/systemd/system/ip-sentinel-agent.service
+    type: config
+  - src: packaging/agent/config.conf.example
+    dst: /etc/ip-sentinel/config.conf.example
+    type: config|noreplace
+  - src: packaging/agent/uninstall.sh
+    dst: /var/lib/ip-sentinel/core/uninstall.sh
+    file_info:
+      mode: 0755
+  - dst: /var/lib/ip-sentinel
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/lib/ip-sentinel/core
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/lib/ip-sentinel/data
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/log/ip-sentinel
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /etc/ip-sentinel
+    type: dir
+    file_info:
+      mode: 0755
+
+scripts:
+  postinstall: packaging/agent/postinst.sh

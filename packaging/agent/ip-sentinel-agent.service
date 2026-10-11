@@ -1,0 +1,16 @@
+[Unit]
+Description=IP-Sentinel Agent (node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=IP_SENTINEL_INSTALL_DIR=/var/lib/ip-sentinel
+Environment=IP_SENTINEL_CONFIG=/etc/ip-sentinel/config.conf
+ExecStart=/usr/bin/ip-sentinel-agent
+Restart=always
+RestartSec=3
+WorkingDirectory=/var/lib/ip-sentinel
+
+[Install]
+WantedBy=multi-user.target

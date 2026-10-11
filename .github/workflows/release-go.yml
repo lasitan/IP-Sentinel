@@ -1,0 +1,27 @@
+name: Release deb packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+      - name: Build deb packages
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          chmod +x scripts/build-deb.sh
+          ARCHS="amd64 arm64" ./scripts/build-deb.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/deb/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

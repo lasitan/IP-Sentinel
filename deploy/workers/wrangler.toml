@@ -1,0 +1,21 @@
+name = "ip-sentinel-master"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+
+[[kv_namespaces]]
+binding = "SENTINEL_KV"
+id = "3acc26970d1c4fb4a99205864ed5ce89"
+
+[durable_objects]
+bindings = [
+  { name = "AGENT_HUB", class_name = "AgentHub" }
+]
+
+[[migrations]]
+tag = "v1"
+# Free plan Durable Objects must be created as SQLite-backed classes.
+new_sqlite_classes = ["AgentHub"]
+
+[vars]
+# Set secrets via: wrangler secret put TG_TOKEN / WEBHOOK_SECRET
+PUBLIC_BASE_URL = ""
