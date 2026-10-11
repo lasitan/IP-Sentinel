@@ -1,0 +1,102 @@
+# 唯一发版入口：只改 version.txt 并推到 main，即可自动打 tag、编译、发布 deb。
+name: Release from version.txt
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - version.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version.txt
+        id: ver
+        run: |
+          set -euo pipefail
+          test -f version.txt
+          MASTER_VERSION="$(awk -F= '/^MASTER_VERSION=/{print $2; exit}' version.txt | tr -d '\r" '"'"'')"
+          AGENT_VERSION="$(awk -F= '/^AGENT_VERSION=/{print $2; exit}' version.txt | tr -d '\r" '"'"'')"
+          if [ -z "$MASTER_VERSION" ] || [ -z "$AGENT_VERSION" ]; then
+            echo "version.txt incomplete" >&2
+            exit 1
+          fi
+          if ! [[ "$MASTER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.+-]+)?$ ]]; then
+            echo "invalid MASTER_VERSION: ${MASTER_VERSION}" >&2
+            exit 1
+          fi
+          if ! [[ "$AGENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.+-]+)?$ ]]; then
+            echo "invalid AGENT_VERSION: ${AGENT_VERSION}" >&2
+            exit 1
+          fi
+          TAG="v${MASTER_VERSION}"
+          echo "master=${MASTER_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "agent=${AGENT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release plan: tag=${TAG} MASTER=${MASTER_VERSION} AGENT=${AGENT_VERSION}"
+
+      - name: Skip if tag already released
+        id: skip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          git fetch --tags --force
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null \
+            && gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} and its GitHub Release already exist; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.skip.outputs.skip != 'true'
+        with:
+          go-version: "1.22"
+
+      - name: Install nfpm
+        if: steps.skip.outputs.skip != 'true'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Build deb packages
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          chmod +x scripts/build-deb.sh
+          ARCHS="amd64 arm64" ./scripts/build-deb.sh
+          ls -la dist/deb/
+
+      - name: Create tag, GitHub Release, upload deb
+        if: steps.skip.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          body: |
+            Automated release from `version.txt`.
+
+            | Component | Version |
+            |-----------|---------|
+            | Master    | `${{ steps.ver.outputs.master }}` |
+            | Agent     | `${{ steps.ver.outputs.agent }}` |
+
+            Installers download:
+            - `ip-sentinel-master_${{ steps.ver.outputs.master }}_amd64.deb` / `_arm64.deb`
+            - `ip-sentinel-agent_${{ steps.ver.outputs.agent }}_amd64.deb` / `_arm64.deb`
+          files: dist/deb/*.deb
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
