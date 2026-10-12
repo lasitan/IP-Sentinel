@@ -60,7 +60,11 @@ func (t *Telegram) Call(method string, payload map[string]any) (map[string]any, 
 		if method == "editMessageText" && strings.Contains(low, "message is not modified") {
 			return map[string]any{"ok": true}, nil
 		}
-		if method == "deleteMessage" && strings.Contains(low, "message to delete not found") {
+		// deleteMessage 常见 400：消息已删/过旧/无权限/论坛参数非法 —— 视为软成功
+		if method == "deleteMessage" && (strings.Contains(low, "message to delete not found") ||
+			strings.Contains(low, "message can't be deleted") ||
+			strings.Contains(low, "message_id_invalid") ||
+			strings.Contains(low, "bad request")) {
 			return map[string]any{"ok": true}, nil
 		}
 		return out, fmt.Errorf("telegram %s: %s", method, desc)
@@ -75,25 +79,35 @@ func withThread(payload map[string]any, threadID int) {
 }
 
 func (t *Telegram) GetUpdates(offset int, timeout int) ([]map[string]any, error) {
+	if timeout < 1 {
+		timeout = 25
+	}
 	q := url.Values{}
 	q.Set("offset", strconv.Itoa(offset))
 	q.Set("timeout", strconv.Itoa(timeout))
 	q.Set("allowed_updates", `["message","callback_query","my_chat_member"]`)
-	resp, err := t.client.Get(t.base + "/getUpdates?" + q.Encode())
+	// 长轮询：HTTP 客户端超时需大于 Telegram timeout
+	client := &http.Client{Timeout: time.Duration(timeout+15) * time.Second}
+	resp, err := client.Get(t.base + "/getUpdates?" + q.Encode())
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	var out struct {
-		OK     bool             `json:"ok"`
-		Result []map[string]any `json:"result"`
+		OK          bool             `json:"ok"`
+		Result      []map[string]any `json:"result"`
+		Description string           `json:"description"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
 	if !out.OK {
-		return nil, fmt.Errorf("getUpdates failed")
+		desc := out.Description
+		if desc == "" {
+			desc = "getUpdates failed"
+		}
+		return nil, fmt.Errorf("%s", desc)
 	}
 	return out.Result, nil
 }
@@ -163,9 +177,11 @@ func (t *Telegram) AnswerCallback(cbID, text string) {
 }
 
 func (t *Telegram) DeleteMessage(chatID string, messageID, threadID int) {
-	payload := map[string]any{"chat_id": chatID, "message_id": messageID}
-	withThread(payload, threadID)
-	_, _ = t.Call("deleteMessage", payload)
+	if messageID <= 0 || chatID == "" {
+		return
+	}
+	// Bot API deleteMessage 仅接受 chat_id + message_id；带 message_thread_id 会 400
+	_, _ = t.Call("deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID})
 }
 
 func (t *Telegram) ReplaceUI(chatID string, oldMsgID int, text string, keyboard [][]map[string]string, threadID int) (int, error) {

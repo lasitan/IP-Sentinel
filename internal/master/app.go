@@ -162,6 +162,8 @@ func (a *App) StartTG(ctx context.Context) {
 func (a *App) pollLoop(ctx context.Context) {
 	offsetPath := filepath.Join(a.Cfg.MasterDir, ".tg_offset")
 	_ = os.MkdirAll(a.Cfg.MasterDir, 0o755)
+	backoff := 2 * time.Second
+	var lastErrLog time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -179,12 +181,43 @@ func (a *App) pollLoop(ctx context.Context) {
 		if b, err := os.ReadFile(offsetPath); err == nil {
 			offset, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 		}
-		updates, err := a.TG.GetUpdates(offset, 30)
+		updates, err := a.TG.GetUpdates(offset, 25)
 		if err != nil {
-			log.Printf("[master] getUpdates: %v", err)
-			time.Sleep(2 * time.Second)
+			// 长轮询空闲超时属正常；网络不可达需退避，避免刷屏
+			errStr := err.Error()
+			transient := strings.Contains(errStr, "timeout") ||
+				strings.Contains(errStr, "Timeout") ||
+				strings.Contains(errStr, "deadline") ||
+				strings.Contains(errStr, "unreachable") ||
+				strings.Contains(errStr, "connection reset") ||
+				strings.Contains(errStr, "connection refused") ||
+				strings.Contains(errStr, "no such host") ||
+				strings.Contains(errStr, "TLS") ||
+				strings.Contains(errStr, "EOF")
+			if time.Since(lastErrLog) > 60*time.Second {
+				log.Printf("[master] getUpdates: %v (backoff %s)", err, backoff)
+				lastErrLog = time.Now()
+			}
+			wait := backoff
+			if !transient {
+				wait = 2 * time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-a.pollStop:
+				return
+			case <-time.After(wait):
+			}
+			if transient {
+				backoff *= 2
+				if backoff > 60*time.Second {
+					backoff = 60 * time.Second
+				}
+			}
 			continue
 		}
+		backoff = 2 * time.Second
 		for _, u := range updates {
 			uid := intFrom(u["update_id"])
 			next := uid + 1
