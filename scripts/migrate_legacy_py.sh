@@ -17,27 +17,13 @@ migrate_conf_key_set() {
   fi
 }
 
-# 按旧版格式读取：跳过空行/#注释，剥离引号与 CR
+# 按旧版格式读取：TG_TOKEN="..."，跳过注释，剥离引号与 CR
 migrate_conf_get() {
-  local file="$1" key="$2"
+  local file="$1" key="$2" line
   [ -f "$file" ] || return 0
-  awk -F= -v k="$key" '
-    {
-      line=$0
-      sub(/\r$/, "", line)
-      sub(/^[[:space:]]+/, "", line)
-      if (line == "" || line ~ /^#/) next
-      eq = index(line, "=")
-      if (eq < 1) next
-      name = substr(line, 1, eq-1)
-      gsub(/[[:space:]]+$/, "", name)
-      if (name != k) next
-      v = substr(line, eq+1)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-      gsub(/^["'\'']+|["'\'']+$/, "", v)
-      print v
-      exit
-    }' "$file"
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" | head -n1 || true)"
+  [ -n "$line" ] || return 0
+  printf '%s\n' "$line" | sed -E "s/^[[:space:]]*${key}=//" | sed -E 's/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//; s/^'\''//; s/'\''$//'
 }
 
 stop_unit_if_any() {

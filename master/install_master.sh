@@ -42,31 +42,20 @@ migrate_conf_key_set() {
   fi
 }
 
+# 兼容旧版：TG_TOKEN="xxx" / TG_TOKEN=xxx / 行尾 CR / 前导空白 / # 注释
 migrate_conf_get() {
-  local file="$1" key="$2"
+  local file="$1" key="$2" line
   [ -f "$file" ] || return 0
-  awk -F= -v k="$key" '
-    {
-      line=$0
-      sub(/\r$/, "", line)
-      sub(/^[[:space:]]+/, "", line)
-      if (line == "" || line ~ /^#/) next
-      eq = index(line, "=")
-      if (eq < 1) next
-      name = substr(line, 1, eq-1)
-      gsub(/[[:space:]]+$/, "", name)
-      if (name != k) next
-      v = substr(line, eq+1)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-      gsub(/^["'\'']+|["'\'']+$/, "", v)
-      print v
-      exit
-    }' "$file"
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" | head -n1 || true)"
+  [ -n "$line" ] || return 0
+  printf '%s\n' "$line" | sed -E "s/^[[:space:]]*${key}=//" | sed -E 's/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//; s/^'\''//; s/'\''$//'
 }
 
 conf_has_token() {
   local f="$1"
-  [ -n "$(migrate_conf_get "$f" "TG_TOKEN")" ]
+  [ -f "$f" ] || return 1
+  # 旧版固化格式：TG_TOKEN="8733...:AAF..."
+  grep -qE '^[[:space:]]*TG_TOKEN="[^"]+"' "$f" || grep -qE '^[[:space:]]*TG_TOKEN=[^[:space:]#]+' "$f"
 }
 
 normalize_master_conf() {
@@ -212,11 +201,7 @@ esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# 优先内嵌迁移；若远端脚本更新则再 source 覆盖同名函数
-if curl -fsSL "${REPO_RAW}/scripts/migrate_legacy_py.sh" -o "${TMP}/migrate_legacy_py.sh" 2>/dev/null; then
-  # shellcheck disable=SC1091
-  . "${TMP}/migrate_legacy_py.sh" || true
-fi
+# 只用内嵌迁移（避免远端 migrate 脚本覆盖解析逻辑）
 migrate_legacy_master "$LEGACY_DIR" "$CONF_DIR" "$DATA_DIR"
 
 VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
@@ -260,11 +245,15 @@ fi
 
 mkdir -p "$CONF_DIR" "$DATA_DIR" "$DATA_DIR/core" "$DATA_DIR/logs"
 
-# 兜底：deb 后若仍无新配置但有旧文件，再拷一次
-if ! conf_has_token "$CONF" && [ -f "${LEGACY_DIR}/master.conf" ]; then
-  cp -a "${LEGACY_DIR}/master.conf" "$CONF"
+# 强制从旧版 master.conf 继承（不依赖 awk；旧格式 KEY="VALUE"）
+if [ -f "${LEGACY_DIR}/master.conf" ] && conf_has_token "${LEGACY_DIR}/master.conf"; then
+  if ! conf_has_token "$CONF"; then
+    cp -a "${LEGACY_DIR}/master.conf" "$CONF"
+    echo "已从 ${LEGACY_DIR}/master.conf 补迁配置（含 TG_TOKEN）"
+  fi
+fi
+if [ -f "$CONF" ]; then
   normalize_master_conf "$CONF" "$DATA_DIR"
-  echo "已从 ${LEGACY_DIR}/master.conf 补迁配置"
 fi
 
 UPGRADE=false
@@ -296,22 +285,27 @@ EOF
   echo "已写入 ${CONF}"
   echo "提示: 启动后在 TG 发送 /nginx 部署反代；节点使用 MASTER_BASE_URL。"
 else
-  if [ ! -f "$CONF" ] && [ -f "${LEGACY_DIR}/master.conf" ]; then
+  # 升级：有旧 Token 则绝不再交互索要
+  if ! conf_has_token "$CONF" && conf_has_token "${LEGACY_DIR}/master.conf"; then
     cp -a "${LEGACY_DIR}/master.conf" "$CONF"
   fi
   if [ -f "$CONF" ]; then
     normalize_master_conf "$CONF" "$DATA_DIR"
     migrate_conf_key_set "$CONF" "MASTER_VERSION" "$MASTER_VERSION"
-    if ! conf_has_token "$CONF"; then
-      if [ -z "${TG_TOKEN:-}" ]; then
-        prompt TG_TOKEN "现有配置缺少 TG_TOKEN，请输入: " || exit 1
-      fi
-      [ -n "${TG_TOKEN:-}" ] || { echo "Token 不能为空"; exit 1; }
-      migrate_conf_key_set "$CONF" "TG_TOKEN" "$TG_TOKEN"
+  fi
+  if ! conf_has_token "$CONF"; then
+    if [ -z "${TG_TOKEN:-}" ]; then
+      prompt TG_TOKEN "现有配置缺少 TG_TOKEN，请输入: " || exit 1
     fi
+    [ -n "${TG_TOKEN:-}" ] || {
+      echo "Token 不能为空（未在 ${LEGACY_DIR}/master.conf 或 ${CONF} 中找到 TG_TOKEN）"
+      exit 1
+    }
+    migrate_conf_key_set "$CONF" "TG_TOKEN" "$TG_TOKEN"
   fi
   echo "升级/迁移模式：保留配置 ${CONF}"
-  echo "  TG_TOKEN / FORUM_* / PUBLIC_IP / ENABLE_MASTER_OTA 等旧键均已保留"
+  echo "  已识别 TG_TOKEN=$(migrate_conf_get "$CONF" "TG_TOKEN" | sed -E 's/^(.{8}).*/\1***/')"
+  echo "  FORUM_* / PUBLIC_IP / ENABLE_MASTER_OTA 等旧键均已保留"
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
