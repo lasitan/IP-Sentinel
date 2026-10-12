@@ -1,12 +1,10 @@
-# IP-Sentinel Master（兼容旧版 Python KEY="VALUE" 格式）
+# IP-Sentinel Master
 TG_TOKEN=""
 MASTER_DIR="/var/lib/ip-sentinel-master"
 DB_FILE="/var/lib/ip-sentinel-master/sentinel.db"
-MASTER_VERSION="5.0.0"
+MASTER_VERSION="5.0.4"
 LISTEN_ADDR="127.0.0.1:19530"
 TG_MODE="polling"
 IS_OFFICIAL_GATEWAY="false"
 ENABLE_MASTER_OTA="false"
-# 以下键在从 Python 升级时会原样保留：
-# FORUM_MODE / FORUM_CHAT_ID / FORUM_OWNER_CHAT_ID / FORUM_GENERAL_UI_*
-# IP_PREF / PUBLIC_IP / BIND_IP / PUBLIC_BASE_URL
+# PUBLIC_BASE_URL 仅允许 https://域名，由 /nginx + Let's Encrypt 写入；禁止 IP/自签

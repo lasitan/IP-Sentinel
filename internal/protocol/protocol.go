@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -129,23 +132,94 @@ func abs64(v int64) int64 {
 	return v
 }
 
-// WSURLFromBase derives wss(s)://host/ws from MASTER_BASE_URL (https://host).
+// IsIPHost reports whether host is a literal IPv4/IPv6 address (brackets stripped).
+func IsIPHost(host string) bool {
+	host = strings.TrimSpace(host)
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return net.ParseIP(host) != nil
+}
+
+// ValidateSecureHTTPSURL requires https:// + DNS hostname (rejects IP / http / empty path hosts).
+func ValidateSecureHTTPSURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fmt.Errorf("URL 为空")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("URL 无效: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("仅允许 https://（当前: %s）", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("缺少主机名")
+	}
+	if IsIPHost(host) {
+		return fmt.Errorf("不信任 IP 地址，请使用域名: %s", host)
+	}
+	return nil
+}
+
+// ValidateSecureWSSURL requires wss:// + DNS hostname.
+func ValidateSecureWSSURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fmt.Errorf("URL 为空")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("URL 无效: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "wss") {
+		return fmt.Errorf("仅允许 wss://（当前: %s）", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("缺少主机名")
+	}
+	if IsIPHost(host) {
+		return fmt.Errorf("不信任 IP 地址，请使用域名: %s", host)
+	}
+	return nil
+}
+
+// WSURLFromBase derives wss://host/ws from MASTER_BASE_URL.
+// Only https://domain or wss://domain are accepted; http/ws/IP are rejected (returns "").
 func WSURLFromBase(base string) string {
-	base = trimSlash(base)
+	base = trimSlash(strings.TrimSpace(base))
 	if base == "" {
 		return ""
 	}
 	switch {
 	case hasPrefix(base, "https://"):
-		return "wss://" + base[len("https://"):] + "/ws"
-	case hasPrefix(base, "http://"):
-		return "ws://" + base[len("http://"):] + "/ws"
-	case hasPrefix(base, "wss://") || hasPrefix(base, "ws://"):
-		if hasSuffix(base, "/ws") {
-			return base
+		if err := ValidateSecureHTTPSURL(base); err != nil {
+			return ""
 		}
-		return trimSlash(base) + "/ws"
+		return "wss://" + base[len("https://"):] + "/ws"
+	case hasPrefix(base, "wss://"):
+		out := base
+		if !hasSuffix(out, "/ws") {
+			out = trimSlash(out) + "/ws"
+		}
+		if err := ValidateSecureWSSURL(out); err != nil {
+			return ""
+		}
+		return out
 	default:
+		// bare hostname → https then wss
+		if strings.Contains(base, "://") {
+			return ""
+		}
+		httpsURL := "https://" + base
+		if err := ValidateSecureHTTPSURL(httpsURL); err != nil {
+			return ""
+		}
 		return "wss://" + base + "/ws"
 	}
 }

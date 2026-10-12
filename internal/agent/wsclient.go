@@ -64,6 +64,11 @@ func (c *WSClient) Run() {
 			continue
 		}
 		url := protocol.WSURLFromBase(cfg.MasterBaseURL)
+		if url == "" {
+			cfg.Log("WS", "WARN", "MASTER_BASE_URL 无效：需 https://域名（禁止 IP / http / 自签场景）")
+			time.Sleep(30 * time.Second)
+			continue
+		}
 		err = c.session(url)
 		if err != nil {
 			cfg.Log("WS", "WARN", fmt.Sprintf("会话结束: %v", err))
@@ -91,9 +96,13 @@ func (c *WSClient) Run() {
 
 func (c *WSClient) session(url string) error {
 	cfg := c.cfg
+	if err := protocol.ValidateSecureWSSURL(url); err != nil {
+		return fmt.Errorf("拒绝非可信 WSS: %w", err)
+	}
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
-		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // master may use self-signed behind IP
+		// 系统 CA 校验；禁止自签 / InsecureSkipVerify
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		NetDial: func(network, addr string) (net.Conn, error) {
 			d := net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 			return d.Dial(network, addr)

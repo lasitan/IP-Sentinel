@@ -22,8 +22,9 @@ type App struct {
 	Hub      *Hub
 	Handlers *Handlers
 
-	pollStop chan struct{}
-	polling  atomic.Bool
+	pollStop   chan struct{}
+	polling    atomic.Bool
+	tgInbound  atomic.Bool // 已收到来自 Telegram 的 webhook POST
 }
 
 func NewApp(cfg *Config) (*App, error) {
@@ -79,6 +80,13 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
+
+	if a.tgInbound.CompareAndSwap(false, true) {
+		log.Printf("[master] 已收到来自 Telegram 的 HTTPS webhook 入站")
+		_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "webhook"})
+		a.Cfg.TGMode = "webhook"
+		a.StopPolling()
+	}
 	go a.processUpdate(update)
 }
 
@@ -125,20 +133,29 @@ func (a *App) StartTG(ctx context.Context) {
 	a.TG.SyncBotCommands()
 	StartFleetScheduler(ctx, a.Handlers)
 
-	if a.Cfg.TGMode == "webhook" && a.Cfg.PublicBaseURL != "" {
+	// 默认 HTTP 长轮询。仅当 PUBLIC_BASE_URL 为可信 https://域名 且 setWebhook 成功
+	// （Telegram 已能建立到本机的 HTTPS 连接）后才退出轮询、改用 webhook。
+	// 禁止 IP / 自签；校验失败则强制轮询。
+	if a.Cfg.PublicBaseURL != "" {
 		if err := a.Handlers.EnableWebhookFromConfig(); err != nil {
-			log.Printf("[master] webhook 启用失败，回退轮询: %v", err)
+			log.Printf("[master] webhook 不可用，使用 HTTP 轮询: %v", err)
 			_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
+			a.Cfg.TGMode = "polling"
+			_ = a.TG.DeleteWebhook()
 		} else {
-			log.Printf("[master] Webhook 模式: %s/tg", strings.TrimRight(a.Cfg.PublicBaseURL, "/"))
+			log.Printf("[master] Telegram 已接受 webhook %s/tg，停止轮询", strings.TrimRight(a.Cfg.PublicBaseURL, "/"))
+			a.Cfg.TGMode = "webhook"
+			a.polling.Store(false)
 			return
 		}
+	} else {
+		_ = a.TG.DeleteWebhook()
+		_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
+		a.Cfg.TGMode = "polling"
 	}
 
-	// Bootstrap / fallback: long polling until webhook configured via /nginx
-	_ = a.TG.DeleteWebhook()
 	a.polling.Store(true)
-	log.Printf("[master] TG 引导轮询已启动（配置 PUBLIC_BASE_URL 或 /nginx 后切换 webhook）")
+	log.Printf("[master] TG HTTP 轮询已启动（请用 /nginx 配置 https://域名；Telegram 连通前不使用 webhook）")
 	go a.pollLoop(ctx)
 }
 

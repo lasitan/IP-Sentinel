@@ -34,15 +34,40 @@ func TestVerifyAuth(t *testing.T) {
 }
 
 func TestWSURLFromBase(t *testing.T) {
-	cases := map[string]string{
+	ok := map[string]string{
 		"https://m.example.com":  "wss://m.example.com/ws",
-		"http://m.example.com/":  "ws://m.example.com/ws",
+		"https://m.example.com/": "wss://m.example.com/ws",
 		"wss://m.example.com/ws": "wss://m.example.com/ws",
 		"m.example.com":          "wss://m.example.com/ws",
 	}
-	for in, want := range cases {
+	for in, want := range ok {
 		if got := WSURLFromBase(in); got != want {
 			t.Fatalf("%q: got %q want %q", in, got, want)
 		}
+	}
+	reject := []string{
+		"http://m.example.com",
+		"ws://m.example.com/ws",
+		"https://1.2.3.4",
+		"https://45.207.210.149",
+		"wss://1.2.3.4/ws",
+		"1.2.3.4",
+	}
+	for _, in := range reject {
+		if got := WSURLFromBase(in); got != "" {
+			t.Fatalf("%q: expected empty, got %q", in, got)
+		}
+	}
+}
+
+func TestValidateSecureHTTPSURL(t *testing.T) {
+	if err := ValidateSecureHTTPSURL("https://master.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSecureHTTPSURL("https://1.2.3.4"); err == nil {
+		t.Fatal("expected IP reject")
+	}
+	if err := ValidateSecureHTTPSURL("http://master.example.com"); err == nil {
+		t.Fatal("expected http reject")
 	}
 }

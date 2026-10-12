@@ -27,6 +27,30 @@ prompt() {
   printf -v "$var" '%s' "$val"
 }
 
+# 仅允许 https://域名（拒绝 IP / http / 裸 IP）
+require_https_domain() {
+  local u="$1"
+  case "$u" in
+    https://*) ;;
+    *) echo "错误: MASTER_BASE_URL 须为 https://域名，当前: ${u}"; return 1 ;;
+  esac
+  local host
+  host="$(printf '%s' "$u" | sed -E 's|^https://||; s|/.*||; s|:.*||')"
+  if [ -z "$host" ] || [[ "$host" =~ ^[0-9.]+$ ]] || [[ "$host" =~ : ]]; then
+    echo "错误: 不信任 IP，请使用域名（例 https://master.example.com）"
+    return 1
+  fi
+  return 0
+}
+
+conf_get() {
+  local file="$1" key="$2" line
+  [ -f "$file" ] || return 0
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" | head -n1 || true)"
+  [ -n "$line" ] || return 0
+  printf '%s\n' "$line" | sed -E "s/^[[:space:]]*${key}=//" | sed -E 's/\r$//; s/^"//; s/"$//'
+}
+
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "错误: 需要 root 权限"
   exit 1
@@ -129,32 +153,48 @@ if [ ! -f "${DATA_DIR}/data/map.json" ]; then
   curl -fsSL "${DATA_RAW}/data/map.json" -o "${DATA_DIR}/data/map.json" || true
 fi
 
-UPGRADE=false
-[ -f "$CONF" ] && UPGRADE=true
-[ -f "${LEGACY_DIR}/config.conf" ] && UPGRADE=true
-if [ "${SILENT_AGENT_OTA:-}" = "true" ]; then
-  UPGRADE=true
+# 仅信任旧配置中的 TG_TOKEN / CHAT_ID / REGION_CODE
+TG_TOKEN="${TG_TOKEN:-$(conf_get "$CONF" TG_TOKEN)}"
+[ -z "${TG_TOKEN}" ] && TG_TOKEN="$(conf_get "${LEGACY_DIR}/config.conf" TG_TOKEN)"
+CHAT_ID="${CHAT_ID:-$(conf_get "$CONF" CHAT_ID)}"
+[ -z "${CHAT_ID}" ] && CHAT_ID="$(conf_get "${LEGACY_DIR}/config.conf" CHAT_ID)"
+REGION_CODE="${REGION_CODE:-$(conf_get "$CONF" REGION_CODE)}"
+[ -z "${REGION_CODE}" ] && REGION_CODE="$(conf_get "${LEGACY_DIR}/config.conf" REGION_CODE)"
+REGION_CODE="${REGION_CODE:-UNKNOWN}"
+
+if [ -z "${TG_TOKEN:-}" ]; then
+  prompt TG_TOKEN "Telegram Bot Token: " || exit 1
+fi
+if [ -z "${CHAT_ID:-}" ]; then
+  prompt CHAT_ID "Chat ID: " || exit 1
+fi
+if [ -z "${REGION_CODE:-}" ]; then
+  if [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
+    prompt REGION_CODE "区域代码 REGION_CODE [UNKNOWN]: " || true
+  fi
+  REGION_CODE="${REGION_CODE:-UNKNOWN}"
 fi
 
-if [ "$UPGRADE" = false ]; then
-  if [ -z "${TG_TOKEN:-}" ]; then
-    prompt TG_TOKEN "Telegram Bot Token: " || exit 1
-  fi
-  if [ -z "${CHAT_ID:-}" ]; then
-    prompt CHAT_ID "Chat ID: " || exit 1
-  fi
-  if [ -z "${MASTER_BASE_URL:-}" ]; then
-    prompt MASTER_BASE_URL "控制端公网 BASE URL (例 https://master.example.com): " || exit 1
-  fi
-  if [ -z "${REGION_CODE:-}" ]; then
-    prompt REGION_CODE "区域代码 REGION_CODE [UNKNOWN]: " || exit 1
-    REGION_CODE="${REGION_CODE:-UNKNOWN}"
-  fi
-  [ -n "${TG_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && [ -n "${MASTER_BASE_URL:-}" ] || {
-    echo "必填项缺失。非交互安装可: TG_TOKEN=... CHAT_ID=... MASTER_BASE_URL=... bash -c \"\$(curl -fsSL ${REPO_RAW}/core/install.sh)\""
+# MASTER_BASE_URL 一律重配（不信任旧 IP / 自签）
+NEED_BASE=true
+if [ -n "${MASTER_BASE_URL:-}" ] && require_https_domain "${MASTER_BASE_URL}"; then
+  NEED_BASE=false
+fi
+if [ "$NEED_BASE" = true ]; then
+  if [ "${SILENT_AGENT_OTA:-}" = "true" ]; then
+    echo "错误: 静默升级须提供 MASTER_BASE_URL=https://域名（禁止 IP）"
     exit 1
-  }
-  cat > "$CONF" <<EOF
+  fi
+  prompt MASTER_BASE_URL "控制端 BASE URL (必须 https://域名，禁止 IP): " || exit 1
+  require_https_domain "${MASTER_BASE_URL}" || exit 1
+fi
+
+[ -n "${TG_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && [ -n "${MASTER_BASE_URL:-}" ] || {
+  echo "必填项缺失。例: TG_TOKEN=... CHAT_ID=... MASTER_BASE_URL=https://master.example.com REGION_CODE=SG"
+  exit 1
+}
+
+cat > "$CONF" <<EOF
 TG_TOKEN="${TG_TOKEN}"
 CHAT_ID="${CHAT_ID}"
 MASTER_BASE_URL="${MASTER_BASE_URL}"
@@ -167,49 +207,8 @@ ENABLE_MAPS_GEO="true"
 ENABLE_OTA="true"
 LOG_FILE="${LOG_DIR}/sentinel.log"
 EOF
-  echo "已写入 ${CONF}"
-  echo "注册消息示例（发给 Bot）: #REGISTER#|NODE|IP|${REGION_CODE}|ALIAS|true"
-else
-  if [ ! -f "$CONF" ] && [ -f "${LEGACY_DIR}/config.conf" ]; then
-    cp -a "${LEGACY_DIR}/config.conf" "$CONF"
-  fi
-  if [ -f "$CONF" ]; then
-    if grep -q '^AGENT_VERSION=' "$CONF"; then
-      sed -i "s|^AGENT_VERSION=.*|AGENT_VERSION=\"${AGENT_VERSION}\"|" "$CONF" || true
-    else
-      echo "AGENT_VERSION=\"${AGENT_VERSION}\"" >> "$CONF"
-    fi
-    if grep -q '^INSTALL_DIR=' "$CONF"; then
-      sed -i "s|^INSTALL_DIR=.*|INSTALL_DIR=\"${DATA_DIR}\"|" "$CONF" || true
-    else
-      echo "INSTALL_DIR=\"${DATA_DIR}\"" >> "$CONF"
-    fi
-    if grep -q '^LOG_FILE=' "$CONF"; then
-      sed -i "s|^LOG_FILE=.*|LOG_FILE=\"${LOG_DIR}/sentinel.log\"|" "$CONF" || true
-    else
-      echo "LOG_FILE=\"${LOG_DIR}/sentinel.log\"" >> "$CONF"
-    fi
-    if ! grep -q '^MASTER_BASE_URL=' "$CONF" || [ -z "$(awk -F= '/^MASTER_BASE_URL=/{print $2}' "$CONF" | tr -d '\"' )" ]; then
-      mip="$(awk -F= '/^MASTER_PUBLIC_IP=/{print $2; exit}' "$CONF" | tr -d '\r" '"'"'')"
-      if [ -n "$mip" ]; then
-        if grep -q '^MASTER_BASE_URL=' "$CONF"; then
-          sed -i "s|^MASTER_BASE_URL=.*|MASTER_BASE_URL=\"https://${mip}:19530\"|" "$CONF" || true
-        else
-          echo "MASTER_BASE_URL=\"https://${mip}:19530\"" >> "$CONF"
-        fi
-        echo "已根据 MASTER_PUBLIC_IP 补全 MASTER_BASE_URL"
-      elif [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
-        if [ -z "${MASTER_BASE_URL:-}" ]; then
-          prompt MASTER_BASE_URL "现有配置缺少 MASTER_BASE_URL，请输入: " || exit 1
-        fi
-        echo "MASTER_BASE_URL=\"${MASTER_BASE_URL}\"" >> "$CONF"
-      else
-        echo "警告: 静默升级缺少 MASTER_BASE_URL，节点可能无法连接控制端"
-      fi
-    fi
-  fi
-  echo "升级/迁移模式：保留配置 ${CONF}"
-fi
+echo "已写入 ${CONF}（仅信任 Token/ChatID/地区；MASTER_BASE_URL=${MASTER_BASE_URL}）"
+echo "注册消息示例（发给 Bot）: #REGISTER#|NODE|IP|${REGION_CODE}|ALIAS|true"
 
 if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
   echo "提示: 未检测到 Chromium；Google 地理定位维护将回退 HTTP"

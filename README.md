@@ -10,10 +10,11 @@ Telegram 频道：[IP-Sentinel Matrix](https://t.me/IP_Sentinel_Matrix)
 
 Go 双端：控制端 / 节点均为单二进制；WebSocket 使用 MessagePack 二进制帧 + HMAC 鉴权。
 
-- **同端口控制面**：控制端单端口提供 `POST /tg`（Telegram Webhook）与 `GET /ws`（节点连接）。
-- **引导轮询 → Webhook**：仅有 Token 时用 `getUpdates` 引导配置；`/nginx` 部署反代后自动 `setWebhook`。
+- **同端口控制面**：控制端单端口提供 `POST /tg`（Telegram Webhook）与 `GET /ws`（节点 WSS）。
+- **HTTPS / WSS only**：禁止裸 IP 与自签；控制端经 Nginx + Let's Encrypt；节点校验证书。
+- **引导轮询 → Webhook**：Telegram 连通前一律 `getUpdates`；`/nginx` + `setWebhook` 成功后再切 webhook。
 - **加强保活**：传输层 Ping 10s + 应用层 ping/pong 10s/15s，并刷新 `last_seen`。
-- **节点发现**：安装时写入 `MASTER_BASE_URL`（不在聊天中预览 WSS 地址）。
+- **节点发现**：安装时写入 `MASTER_BASE_URL=https://域名`（不在聊天中预览 WSS 地址）。
 - **deb 发包**：只改 `[version.txt](version.txt)` 并推到 `main`：CI（[release.yml](.github/workflows/release.yml)）自动打 `v{MASTER_VERSION}` tag、编译、发布 `.deb`；安装脚本同样读取 `version.txt`。
 - **Workers 部署面**：可选 Cloudflare Workers + Durable Objects + KV（见 `[deploy/workers](deploy/workers)`）。
 
@@ -72,14 +73,14 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/lasitan/IP-Sentinel
 
 ### 从 Python 版无感升级
 
-在已安装旧版（`/opt/ip_sentinel*` + uv/Playwright）的机器上**再次执行上述安装命令**即可：
+在已安装旧版（`/opt/ip_sentinel*`）的机器上**再次执行上述安装命令**即可：
 
-1. 停止旧 systemd / cron / Python 进程
-2. 按旧版 `KEY="VALUE"` 格式整文件读取 `master.conf` / `config.conf`（保留 `TG_TOKEN`、`FORUM_*`、`PUBLIC_IP`、`ENABLE_MASTER_OTA` 等全部键），并改写路径到 `/etc` + `/var/lib`
-3. 删除 `.venv`、`py/`、`uv.lock`、Playwright 缓存等旧依赖
-4. 安装 Go `.deb` 并启动新服务
+1. 停止旧进程并删除 `.venv` / `py` / Playwright / 自签 `ws_*.pem`
+2. **仅信任**旧配置中的 `TG_TOKEN`、节点侧 `CHAT_ID` / `REGION_CODE`；其余一律重配
+3. 控制端启动后为 **HTTP 长轮询**；对 Bot 发送 `/nginx` 配置 **https 域名 + Let's Encrypt**，Telegram `setWebhook` 成功后才切 webhook
+4. 节点 `MASTER_BASE_URL` 必须为 `https://域名`（禁止 IP / http / 自签跳过校验），连接使用 **WSS**
 
-静默升级同样走该路径（`SILENT_MASTER_OTA=true` / `SILENT_AGENT_OTA=true`）。节点若仅有旧字段 `MASTER_PUBLIC_IP`，会自动补全 `MASTER_BASE_URL=https://IP:19530`；控制端若有 `PUBLIC_IP` 且无 `PUBLIC_BASE_URL`，会补 `PUBLIC_BASE_URL=https://IP`。
+静默升级：`SILENT_MASTER_OTA=true` / `SILENT_AGENT_OTA=true`，节点须同时传入合法的 `MASTER_BASE_URL=https://...`。
 
 ### 模式 B：Workers + KV
 

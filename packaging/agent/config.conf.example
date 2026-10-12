@@ -1,8 +1,9 @@
 TG_TOKEN=""
 CHAT_ID=""
-MASTER_BASE_URL=""
+# 必须 https://域名（禁止 IP / http）；派生 wss://域名/ws 且校验证书
+MASTER_BASE_URL="https://master.example.com"
 INSTALL_DIR="/var/lib/ip-sentinel"
-AGENT_VERSION="5.0.0"
+AGENT_VERSION="5.0.4"
 REGION_CODE="UNKNOWN"
 ENABLE_GOOGLE="true"
 ENABLE_TRUST="true"

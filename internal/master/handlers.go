@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lasitan/IP-Sentinel/internal/protocol"
 )
 
 type Handlers struct {
@@ -714,8 +716,16 @@ func (h *Handlers) handleNginxWizard(owner, text, st string, threadID int) {
 	}
 	switch st {
 	case "domain":
+		domain := strings.ToLower(strings.TrimSpace(text))
+		domain = strings.TrimPrefix(domain, "https://")
+		domain = strings.TrimPrefix(domain, "http://")
+		domain = strings.TrimSuffix(domain, "/")
+		if domain == "" || protocol.IsIPHost(domain) || strings.Contains(domain, "/") {
+			_, _ = h.tg.SendMessage(owner, "❌ 请提供域名（禁止 IP）。例: `master.example.com`", true, threadID)
+			return
+		}
 		h.mu.Lock()
-		h.nginx[owner] = "domain:" + text
+		h.nginx[owner] = "domain:" + domain
 		h.mu.Unlock()
 		_, _ = h.tg.SendMessage(owner, "可选：回复邮箱用于 Let's Encrypt（或发送 `-` 跳过）", false, threadID)
 	default:
@@ -728,6 +738,11 @@ func (h *Handlers) handleNginxWizard(owner, text, st string, threadID int) {
 		delete(h.nginx, owner)
 		h.mu.Unlock()
 
+		if protocol.IsIPHost(domain) {
+			_, _ = h.tg.SendMessage(owner, "❌ 不支持 IP，请使用域名 + Let's Encrypt", false, threadID)
+			return
+		}
+
 		upstream := "http://" + h.cfg.ListenAddr
 		if !strings.Contains(h.cfg.ListenAddr, "://") {
 			upstream = "http://" + h.cfg.ListenAddr
@@ -738,13 +753,17 @@ func (h *Handlers) handleNginxWizard(owner, text, st string, threadID int) {
 			return
 		}
 		base := "https://" + domain
+		if err := protocol.ValidateSecureHTTPSURL(base); err != nil {
+			_, _ = h.tg.SendMessage(owner, "❌ "+err.Error(), false, threadID)
+			return
+		}
 		secret := h.cfg.WebhookSecret
 		if secret == "" {
 			secret = randomHex(16)
 		}
 		hook := strings.TrimRight(base, "/") + "/tg"
 		if err := h.tg.SetWebhook(hook, secret); err != nil {
-			_, _ = h.tg.SendMessage(owner, msg+"\n⚠️ setWebhook 失败: "+err.Error(), false, threadID)
+			_, _ = h.tg.SendMessage(owner, msg+"\n⚠️ setWebhook 失败（仍保持 HTTP 轮询）: "+err.Error(), false, threadID)
 			return
 		}
 		_ = h.cfg.SaveKeys(map[string]string{
@@ -752,7 +771,10 @@ func (h *Handlers) handleNginxWizard(owner, text, st string, threadID int) {
 			"WEBHOOK_SECRET":  secret,
 			"TG_MODE":         "webhook",
 		})
-		_, _ = h.tg.SendMessage(owner, msg+"\n🔗 已切换 Webhook 模式\nAgent 请配置 `MASTER_BASE_URL="+base+"`", true, threadID)
+		h.cfg.PublicBaseURL = base
+		h.cfg.WebhookSecret = secret
+		h.cfg.TGMode = "webhook"
+		_, _ = h.tg.SendMessage(owner, msg+"\n🔗 Telegram 已连通 Webhook\nAgent 请配置 `MASTER_BASE_URL="+base+"`（仅 https://域名）", true, threadID)
 		log.Printf("[master] webhook enabled: %s", hook)
 	}
 }
@@ -768,16 +790,20 @@ func runShell(cmd string) error {
 	return c.Start()
 }
 
-// EnableWebhookFromConfig activates webhook when PUBLIC_BASE_URL already set.
+// EnableWebhookFromConfig activates webhook when PUBLIC_BASE_URL is a trusted https://domain.
 func (h *Handlers) EnableWebhookFromConfig() error {
 	base := strings.TrimRight(h.cfg.PublicBaseURL, "/")
 	if base == "" {
 		return fmt.Errorf("PUBLIC_BASE_URL empty")
 	}
+	if err := protocol.ValidateSecureHTTPSURL(base); err != nil {
+		return fmt.Errorf("PUBLIC_BASE_URL 不可信: %w", err)
+	}
 	secret := h.cfg.WebhookSecret
 	if secret == "" {
 		secret = randomHex(16)
 		_ = h.cfg.SaveKeys(map[string]string{"WEBHOOK_SECRET": secret})
+		h.cfg.WebhookSecret = secret
 	}
 	hook := base + "/tg"
 	if err := h.tg.SetWebhook(hook, secret); err != nil {

@@ -58,23 +58,21 @@ conf_has_token() {
   grep -qE '^[[:space:]]*TG_TOKEN="[^"]+"' "$f" || grep -qE '^[[:space:]]*TG_TOKEN=[^[:space:]#]+' "$f"
 }
 
-normalize_master_conf() {
-  local conf="$1" data_dir="$2"
-  [ -f "$conf" ] || return 0
-  migrate_conf_key_set "$conf" "MASTER_DIR" "$data_dir"
-  migrate_conf_key_set "$conf" "DB_FILE" "${data_dir}/sentinel.db"
-  if [ -z "$(migrate_conf_get "$conf" "LISTEN_ADDR")" ]; then
-    migrate_conf_key_set "$conf" "LISTEN_ADDR" "127.0.0.1:19530"
-  fi
-  if [ -z "$(migrate_conf_get "$conf" "TG_MODE")" ]; then
-    migrate_conf_key_set "$conf" "TG_MODE" "polling"
-  fi
-  if [ -z "$(migrate_conf_get "$conf" "PUBLIC_BASE_URL")" ]; then
-    local pip
-    pip="$(migrate_conf_get "$conf" "PUBLIC_IP")"
-    if [ -n "$pip" ]; then
-      migrate_conf_key_set "$conf" "PUBLIC_BASE_URL" "https://${pip}"
-    fi
+# 仅信任 TG_TOKEN；强制 polling；清除 IP/自签相关 URL
+write_master_conf_minimal() {
+  local conf="$1" data_dir="$2" token="$3" ver="${4:-}"
+  cat > "$conf" <<EOF
+# only TG_TOKEN trusted from legacy; reconfigure https via /nginx
+TG_TOKEN="${token}"
+MASTER_DIR="${data_dir}"
+DB_FILE="${data_dir}/sentinel.db"
+LISTEN_ADDR="127.0.0.1:19530"
+TG_MODE="polling"
+IS_OFFICIAL_GATEWAY="false"
+ENABLE_MASTER_OTA="false"
+EOF
+  if [ -n "$ver" ]; then
+    echo "MASTER_VERSION=\"${ver}\"" >> "$conf"
   fi
 }
 
@@ -93,7 +91,7 @@ migrate_legacy_master() {
   fi
   [ "$found" = false ] && return 0
 
-  echo "检测到旧版 Python 控制端 (${legacy})，开始无感迁移…"
+  echo "检测到旧版 Python 控制端 (${legacy})，仅迁移 TG_TOKEN…"
 
   if command -v systemctl >/dev/null 2>&1; then
     systemctl stop "ip-sentinel-master" 2>/dev/null || true
@@ -110,25 +108,14 @@ migrate_legacy_master() {
 
   mkdir -p "$conf_dir" "$data_dir" "$data_dir/core" "$data_dir/logs"
 
-  local legacy_token="" new_token=""
-  legacy_token="$(migrate_conf_get "$legacy_conf" "TG_TOKEN")"
-  new_token="$(migrate_conf_get "$new_conf" "TG_TOKEN")"
-
-  if [ -f "$legacy_conf" ]; then
-    if [ ! -f "$new_conf" ] || [ -z "$new_token" ]; then
-      cp -a "$legacy_conf" "$new_conf"
-      echo "已迁移配置 → ${new_conf}（保留旧版全部键：TG_TOKEN/FORUM_*/PUBLIC_IP 等）"
-    else
-      echo "新配置已有 TG_TOKEN，保留 ${new_conf}"
-    fi
-  fi
-
-  if [ -f "$new_conf" ]; then
-    normalize_master_conf "$new_conf" "$data_dir"
-    if [ -z "$(migrate_conf_get "$new_conf" "TG_TOKEN")" ] && [ -n "$legacy_token" ]; then
-      migrate_conf_key_set "$new_conf" "TG_TOKEN" "$legacy_token"
-    fi
-    echo "已读取旧版配置键并规范化路径"
+  local token=""
+  token="$(migrate_conf_get "$legacy_conf" "TG_TOKEN")"
+  [ -z "$token" ] && token="$(migrate_conf_get "$new_conf" "TG_TOKEN")"
+  if [ -n "$token" ]; then
+    write_master_conf_minimal "$new_conf" "$data_dir" "$token"
+    echo "已写入精简配置（TG_MODE=polling；需 /nginx 配置 https 域名）"
+  else
+    echo "警告: 未找到 TG_TOKEN"
   fi
 
   if [ -f "${legacy}/sentinel.db" ] && [ ! -f "${data_dir}/sentinel.db" ]; then
@@ -139,13 +126,8 @@ migrate_legacy_master() {
     echo "已迁移数据库 → ${data_dir}/sentinel.db"
   fi
 
-  if [ -d "${legacy}/core" ]; then
-    mkdir -p "${data_dir}/core"
-    for f in forum_topics.json ws_cert.pem ws_key.pem; do
-      if [ -f "${legacy}/core/${f}" ] && [ ! -f "${data_dir}/core/${f}" ]; then
-        cp -a "${legacy}/core/${f}" "${data_dir}/core/${f}"
-      fi
-    done
+  if [ -f "${legacy}/core/forum_topics.json" ] && [ ! -f "${data_dir}/core/forum_topics.json" ]; then
+    cp -a "${legacy}/core/forum_topics.json" "${data_dir}/core/forum_topics.json"
   fi
   if [ -f "${legacy}/.tg_offset" ] && [ ! -f "${data_dir}/.tg_offset" ]; then
     cp -a "${legacy}/.tg_offset" "${data_dir}/.tg_offset"
@@ -154,11 +136,12 @@ migrate_legacy_master() {
   rm -rf "${legacy}/.venv" "${legacy}/py" "${legacy}/uv.lock" "${legacy}/pyproject.toml" \
     "${legacy}/.python-version" "${legacy}/__pycache__" \
     "${legacy}/ms-playwright" "${legacy}/.cache/ms-playwright" 2>/dev/null || true
+  rm -f "${legacy}/core/ws_cert.pem" "${legacy}/core/ws_key.pem" 2>/dev/null || true
   rm -f /etc/systemd/system/ip-sentinel-master.service 2>/dev/null || true
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload 2>/dev/null || true
   fi
-  echo "Python 控制端运行时已清理；配置与数据已保留。"
+  echo "Python 控制端已清理；请用 /nginx 配置 Let's Encrypt 域名。"
 }
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -245,17 +228,6 @@ fi
 
 mkdir -p "$CONF_DIR" "$DATA_DIR" "$DATA_DIR/core" "$DATA_DIR/logs"
 
-# 强制从旧版 master.conf 继承（不依赖 awk；旧格式 KEY="VALUE"）
-if [ -f "${LEGACY_DIR}/master.conf" ] && conf_has_token "${LEGACY_DIR}/master.conf"; then
-  if ! conf_has_token "$CONF"; then
-    cp -a "${LEGACY_DIR}/master.conf" "$CONF"
-    echo "已从 ${LEGACY_DIR}/master.conf 补迁配置（含 TG_TOKEN）"
-  fi
-fi
-if [ -f "$CONF" ]; then
-  normalize_master_conf "$CONF" "$DATA_DIR"
-fi
-
 UPGRADE=false
 conf_has_token "$CONF" && UPGRADE=true
 conf_has_token "${LEGACY_DIR}/master.conf" && UPGRADE=true
@@ -272,40 +244,23 @@ if [ "$UPGRADE" = false ]; then
     echo "Token 不能为空。非交互安装请: TG_TOKEN='xxx' bash -c \"\$(curl -fsSL ${REPO_RAW}/master/install_master.sh)\""
     exit 1
   }
-  cat > "$CONF" <<EOF
-TG_TOKEN="${TG_TOKEN}"
-MASTER_DIR="${DATA_DIR}"
-DB_FILE="${DATA_DIR}/sentinel.db"
-MASTER_VERSION="${MASTER_VERSION}"
-LISTEN_ADDR="127.0.0.1:19530"
-TG_MODE="polling"
-IS_OFFICIAL_GATEWAY="false"
-ENABLE_MASTER_OTA="false"
-EOF
+  write_master_conf_minimal "$CONF" "$DATA_DIR" "$TG_TOKEN" "$MASTER_VERSION"
   echo "已写入 ${CONF}"
-  echo "提示: 启动后在 TG 发送 /nginx 部署反代；节点使用 MASTER_BASE_URL。"
+  echo "提示: 启动后对 Bot 发送 /nginx（https 域名 + Let's Encrypt）；Telegram 连通前使用 HTTP 轮询。"
+  echo "节点 MASTER_BASE_URL 须为 https://域名（禁止 IP/自签）。"
 else
-  # 升级：有旧 Token 则绝不再交互索要
-  if ! conf_has_token "$CONF" && conf_has_token "${LEGACY_DIR}/master.conf"; then
-    cp -a "${LEGACY_DIR}/master.conf" "$CONF"
-  fi
-  if [ -f "$CONF" ]; then
-    normalize_master_conf "$CONF" "$DATA_DIR"
-    migrate_conf_key_set "$CONF" "MASTER_VERSION" "$MASTER_VERSION"
-  fi
-  if ! conf_has_token "$CONF"; then
+  token="$(migrate_conf_get "$CONF" "TG_TOKEN")"
+  [ -z "$token" ] && token="$(migrate_conf_get "${LEGACY_DIR}/master.conf" "TG_TOKEN")"
+  if [ -z "$token" ]; then
     if [ -z "${TG_TOKEN:-}" ]; then
-      prompt TG_TOKEN "现有配置缺少 TG_TOKEN，请输入: " || exit 1
+      prompt TG_TOKEN "Telegram Bot Token: " || exit 1
     fi
-    [ -n "${TG_TOKEN:-}" ] || {
-      echo "Token 不能为空（未在 ${LEGACY_DIR}/master.conf 或 ${CONF} 中找到 TG_TOKEN）"
-      exit 1
-    }
-    migrate_conf_key_set "$CONF" "TG_TOKEN" "$TG_TOKEN"
+    token="${TG_TOKEN}"
   fi
-  echo "升级/迁移模式：保留配置 ${CONF}"
-  echo "  已识别 TG_TOKEN=$(migrate_conf_get "$CONF" "TG_TOKEN" | sed -E 's/^(.{8}).*/\1***/')"
-  echo "  FORUM_* / PUBLIC_IP / ENABLE_MASTER_OTA 等旧键均已保留"
+  [ -n "$token" ] || { echo "Token 不能为空"; exit 1; }
+  write_master_conf_minimal "$CONF" "$DATA_DIR" "$token" "$MASTER_VERSION"
+  echo "升级模式：仅保留 TG_TOKEN，已重置为 TG_MODE=polling"
+  echo "  请发送 /nginx 重新配置 https 域名；勿使用 IP 或自签证书"
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
