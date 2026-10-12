@@ -1,14 +1,176 @@
 #!/bin/bash
-# IP-Sentinel Master：环境检查后安装 .deb
+# IP-Sentinel Master：环境检查 →（可选）Python 无感迁移 → 安装 .deb
+# 兼容旧版 /opt/ip_sentinel_master/master.conf（KEY="VALUE" + # 注释）。
 set -euo pipefail
 
 REPO="lasitan/IP-Sentinel"
+REPO_RAW="https://raw.githubusercontent.com/${REPO}/main"
 CONF_DIR="/etc/ip-sentinel-master"
 CONF="${CONF_DIR}/master.conf"
 DATA_DIR="/var/lib/ip-sentinel-master"
-VERSION_URL="https://raw.githubusercontent.com/${REPO}/main/version.txt"
+LEGACY_DIR="/opt/ip_sentinel_master"
+VERSION_URL="${REPO_RAW}/version.txt"
 RELEASE_BASE="https://github.com/${REPO}/releases/download"
 SERVICE="ip-sentinel-master"
+
+# curl|bash 时 stdin 是管道，交互必须读 /dev/tty
+prompt() {
+  local var="$1" msg="$2" val=""
+  if [ -r /dev/tty ]; then
+    printf '%s' "$msg" > /dev/tty
+    IFS= read -r val < /dev/tty || true
+  else
+    echo "错误: 无法交互输入（非 TTY）。请用环境变量: ${var}=... $0" >&2
+    echo "或: bash -c \"\$(curl -fsSL ${REPO_RAW}/master/install_master.sh)\"" >&2
+    return 1
+  fi
+  printf -v "$var" '%s' "$val"
+}
+
+# --- 内嵌迁移工具（与 scripts/migrate_legacy_py.sh 行为一致，避免二次拉取失败）---
+migrate_conf_key_set() {
+  local file="$1" key="$2" val="$3"
+  local line="${key}=\"${val}\""
+  if [ ! -f "$file" ]; then
+    echo "$line" >> "$file"
+    return
+  fi
+  if grep -qE "^[[:space:]]*${key}=" "$file"; then
+    sed -i -E "s|^[[:space:]]*${key}=.*|${line}|" "$file"
+  else
+    echo "$line" >> "$file"
+  fi
+}
+
+migrate_conf_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 0
+  awk -F= -v k="$key" '
+    {
+      line=$0
+      sub(/\r$/, "", line)
+      sub(/^[[:space:]]+/, "", line)
+      if (line == "" || line ~ /^#/) next
+      eq = index(line, "=")
+      if (eq < 1) next
+      name = substr(line, 1, eq-1)
+      gsub(/[[:space:]]+$/, "", name)
+      if (name != k) next
+      v = substr(line, eq+1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+      gsub(/^["'\'']+|["'\'']+$/, "", v)
+      print v
+      exit
+    }' "$file"
+}
+
+conf_has_token() {
+  local f="$1"
+  [ -n "$(migrate_conf_get "$f" "TG_TOKEN")" ]
+}
+
+normalize_master_conf() {
+  local conf="$1" data_dir="$2"
+  [ -f "$conf" ] || return 0
+  migrate_conf_key_set "$conf" "MASTER_DIR" "$data_dir"
+  migrate_conf_key_set "$conf" "DB_FILE" "${data_dir}/sentinel.db"
+  if [ -z "$(migrate_conf_get "$conf" "LISTEN_ADDR")" ]; then
+    migrate_conf_key_set "$conf" "LISTEN_ADDR" "127.0.0.1:19530"
+  fi
+  if [ -z "$(migrate_conf_get "$conf" "TG_MODE")" ]; then
+    migrate_conf_key_set "$conf" "TG_MODE" "polling"
+  fi
+  if [ -z "$(migrate_conf_get "$conf" "PUBLIC_BASE_URL")" ]; then
+    local pip
+    pip="$(migrate_conf_get "$conf" "PUBLIC_IP")"
+    if [ -n "$pip" ]; then
+      migrate_conf_key_set "$conf" "PUBLIC_BASE_URL" "https://${pip}"
+    fi
+  fi
+}
+
+migrate_legacy_master() {
+  local legacy="${1:-/opt/ip_sentinel_master}"
+  local conf_dir="${2:-/etc/ip-sentinel-master}"
+  local data_dir="${3:-/var/lib/ip-sentinel-master}"
+  local new_conf="${conf_dir}/master.conf"
+  local legacy_conf="${legacy}/master.conf"
+
+  local found=false
+  [ -f "$legacy_conf" ] && found=true
+  [ -f "${legacy}/sentinel.db" ] && found=true
+  if [ -d "${legacy}/py" ] || [ -d "${legacy}/.venv" ]; then
+    found=true
+  fi
+  [ "$found" = false ] && return 0
+
+  echo "检测到旧版 Python 控制端 (${legacy})，开始无感迁移…"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop "ip-sentinel-master" 2>/dev/null || true
+    systemctl disable "ip-sentinel-master" 2>/dev/null || true
+  fi
+  pkill -f "run_master.py" 2>/dev/null || true
+  if command -v crontab >/dev/null 2>&1; then
+    local tmpc
+    tmpc="$(mktemp)"
+    crontab -l 2>/dev/null | grep -vF "ip-sentinel-master" | grep -vF "run_master.py" | grep -vF "/opt/ip_sentinel_master" > "$tmpc" || true
+    crontab "$tmpc" 2>/dev/null || true
+    rm -f "$tmpc"
+  fi
+
+  mkdir -p "$conf_dir" "$data_dir" "$data_dir/core" "$data_dir/logs"
+
+  local legacy_token="" new_token=""
+  legacy_token="$(migrate_conf_get "$legacy_conf" "TG_TOKEN")"
+  new_token="$(migrate_conf_get "$new_conf" "TG_TOKEN")"
+
+  if [ -f "$legacy_conf" ]; then
+    if [ ! -f "$new_conf" ] || [ -z "$new_token" ]; then
+      cp -a "$legacy_conf" "$new_conf"
+      echo "已迁移配置 → ${new_conf}（保留旧版全部键：TG_TOKEN/FORUM_*/PUBLIC_IP 等）"
+    else
+      echo "新配置已有 TG_TOKEN，保留 ${new_conf}"
+    fi
+  fi
+
+  if [ -f "$new_conf" ]; then
+    normalize_master_conf "$new_conf" "$data_dir"
+    if [ -z "$(migrate_conf_get "$new_conf" "TG_TOKEN")" ] && [ -n "$legacy_token" ]; then
+      migrate_conf_key_set "$new_conf" "TG_TOKEN" "$legacy_token"
+    fi
+    echo "已读取旧版配置键并规范化路径"
+  fi
+
+  if [ -f "${legacy}/sentinel.db" ] && [ ! -f "${data_dir}/sentinel.db" ]; then
+    cp -a "${legacy}/sentinel.db" "${data_dir}/sentinel.db"
+    for s in -wal -shm; do
+      [ -f "${legacy}/sentinel.db${s}" ] && cp -a "${legacy}/sentinel.db${s}" "${data_dir}/sentinel.db${s}" || true
+    done
+    echo "已迁移数据库 → ${data_dir}/sentinel.db"
+  fi
+
+  if [ -d "${legacy}/core" ]; then
+    mkdir -p "${data_dir}/core"
+    for f in forum_topics.json ws_cert.pem ws_key.pem; do
+      if [ -f "${legacy}/core/${f}" ] && [ ! -f "${data_dir}/core/${f}" ]; then
+        cp -a "${legacy}/core/${f}" "${data_dir}/core/${f}"
+      fi
+    done
+  fi
+  if [ -f "${legacy}/.tg_offset" ] && [ ! -f "${data_dir}/.tg_offset" ]; then
+    cp -a "${legacy}/.tg_offset" "${data_dir}/.tg_offset"
+  fi
+
+  rm -rf "${legacy}/.venv" "${legacy}/py" "${legacy}/uv.lock" "${legacy}/pyproject.toml" \
+    "${legacy}/.python-version" "${legacy}/__pycache__" \
+    "${legacy}/ms-playwright" "${legacy}/.cache/ms-playwright" 2>/dev/null || true
+  rm -f /etc/systemd/system/ip-sentinel-master.service 2>/dev/null || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+  echo "Python 控制端运行时已清理；配置与数据已保留。"
+}
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "错误: 需要 root 权限"
@@ -47,6 +209,16 @@ case "$arch" in
   *) echo "错误: 不支持的架构: $arch"; exit 1 ;;
 esac
 
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# 优先内嵌迁移；若远端脚本更新则再 source 覆盖同名函数
+if curl -fsSL "${REPO_RAW}/scripts/migrate_legacy_py.sh" -o "${TMP}/migrate_legacy_py.sh" 2>/dev/null; then
+  # shellcheck disable=SC1091
+  . "${TMP}/migrate_legacy_py.sh" || true
+fi
+migrate_legacy_master "$LEGACY_DIR" "$CONF_DIR" "$DATA_DIR"
+
 VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
   echo "错误: 无法读取 ${VERSION_URL}"
   exit 1
@@ -60,9 +232,6 @@ TAG="v${MASTER_VERSION}"
 DEB_NAME="ip-sentinel-master_${MASTER_VERSION}_${DEB_ARCH}.deb"
 URL="${RELEASE_BASE}/${TAG}/${DEB_NAME}"
 echo "version.txt => MASTER_VERSION=${MASTER_VERSION} (tag ${TAG})"
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 echo "检查通过: ${PRETTY_NAME:-linux} / ${DEB_ARCH} / ${DEB_NAME}"
 echo "下载 ${URL} ..."
@@ -91,17 +260,29 @@ fi
 
 mkdir -p "$CONF_DIR" "$DATA_DIR" "$DATA_DIR/core" "$DATA_DIR/logs"
 
+# 兜底：deb 后若仍无新配置但有旧文件，再拷一次
+if ! conf_has_token "$CONF" && [ -f "${LEGACY_DIR}/master.conf" ]; then
+  cp -a "${LEGACY_DIR}/master.conf" "$CONF"
+  normalize_master_conf "$CONF" "$DATA_DIR"
+  echo "已从 ${LEGACY_DIR}/master.conf 补迁配置"
+fi
+
 UPGRADE=false
-[ -f "$CONF" ] && UPGRADE=true
-if [ "${SILENT_MASTER_OTA:-}" = "true" ] && [ -f "$CONF" ]; then
+conf_has_token "$CONF" && UPGRADE=true
+conf_has_token "${LEGACY_DIR}/master.conf" && UPGRADE=true
+[ -f "${LEGACY_DIR}/sentinel.db" ] && UPGRADE=true
+if [ "${SILENT_MASTER_OTA:-}" = "true" ]; then
   UPGRADE=true
 fi
 
 if [ "$UPGRADE" = false ]; then
   if [ -z "${TG_TOKEN:-}" ]; then
-    read -r -p "Telegram Bot Token: " TG_TOKEN
+    prompt TG_TOKEN "Telegram Bot Token: " || exit 1
   fi
-  [ -n "${TG_TOKEN:-}" ] || { echo "Token 不能为空"; exit 1; }
+  [ -n "${TG_TOKEN:-}" ] || {
+    echo "Token 不能为空。非交互安装请: TG_TOKEN='xxx' bash -c \"\$(curl -fsSL ${REPO_RAW}/master/install_master.sh)\""
+    exit 1
+  }
   cat > "$CONF" <<EOF
 TG_TOKEN="${TG_TOKEN}"
 MASTER_DIR="${DATA_DIR}"
@@ -115,10 +296,22 @@ EOF
   echo "已写入 ${CONF}"
   echo "提示: 启动后在 TG 发送 /nginx 部署反代；节点使用 MASTER_BASE_URL。"
 else
-  if grep -q '^MASTER_VERSION=' "$CONF"; then
-    sed -i "s|^MASTER_VERSION=.*|MASTER_VERSION=\"${MASTER_VERSION}\"|" "$CONF" || true
+  if [ ! -f "$CONF" ] && [ -f "${LEGACY_DIR}/master.conf" ]; then
+    cp -a "${LEGACY_DIR}/master.conf" "$CONF"
   fi
-  echo "升级模式：保留现有 ${CONF}"
+  if [ -f "$CONF" ]; then
+    normalize_master_conf "$CONF" "$DATA_DIR"
+    migrate_conf_key_set "$CONF" "MASTER_VERSION" "$MASTER_VERSION"
+    if ! conf_has_token "$CONF"; then
+      if [ -z "${TG_TOKEN:-}" ]; then
+        prompt TG_TOKEN "现有配置缺少 TG_TOKEN，请输入: " || exit 1
+      fi
+      [ -n "${TG_TOKEN:-}" ] || { echo "Token 不能为空"; exit 1; }
+      migrate_conf_key_set "$CONF" "TG_TOKEN" "$TG_TOKEN"
+    fi
+  fi
+  echo "升级/迁移模式：保留配置 ${CONF}"
+  echo "  TG_TOKEN / FORUM_* / PUBLIC_IP / ENABLE_MASTER_OTA 等旧键均已保留"
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -138,4 +331,4 @@ echo "控制端软件包已移除。配置/数据可能仍在 /etc/ip-sentinel-m
 EOF
 chmod +x "${DATA_DIR}/uninstall.sh"
 
-echo "控制端安装完成。"
+echo "控制端安装完成（Go/deb）。"

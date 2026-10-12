@@ -1,16 +1,31 @@
 #!/bin/bash
-# IP-Sentinel Agent：环境检查后安装 .deb
+# IP-Sentinel Agent：环境检查 →（可选）Python 无感迁移 → 安装 .deb
 set -euo pipefail
 
 REPO="lasitan/IP-Sentinel"
+REPO_RAW="https://raw.githubusercontent.com/${REPO}/main"
 CONF_DIR="/etc/ip-sentinel"
 CONF="${CONF_DIR}/config.conf"
 DATA_DIR="/var/lib/ip-sentinel"
 LOG_DIR="/var/log/ip-sentinel"
-VERSION_URL="https://raw.githubusercontent.com/${REPO}/main/version.txt"
+LEGACY_DIR="/opt/ip_sentinel"
+VERSION_URL="${REPO_RAW}/version.txt"
 RELEASE_BASE="https://github.com/${REPO}/releases/download"
-DATA_RAW="https://raw.githubusercontent.com/${REPO}/main"
+DATA_RAW="${REPO_RAW}"
 SERVICE="ip-sentinel-agent"
+
+# curl|bash 时 stdin 是管道，交互必须读 /dev/tty
+prompt() {
+  local var="$1" msg="$2" val=""
+  if [ -r /dev/tty ]; then
+    printf '%s' "$msg" > /dev/tty
+    IFS= read -r val < /dev/tty || true
+  else
+    echo "错误: 无法交互输入（非 TTY）。请用环境变量传入 ${var}，或: bash -c \"\$(curl -fsSL ${REPO_RAW}/core/install.sh)\"" >&2
+    return 1
+  fi
+  printf -v "$var" '%s' "$val"
+}
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "错误: 需要 root 权限"
@@ -49,6 +64,18 @@ case "$arch" in
   *) echo "错误: 不支持的架构: $arch"; exit 1 ;;
 esac
 
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# --- Python → Go 无感迁移（保留配置，删除旧依赖）---
+if curl -fsSL "${REPO_RAW}/scripts/migrate_legacy_py.sh" -o "${TMP}/migrate_legacy_py.sh"; then
+  # shellcheck disable=SC1091
+  . "${TMP}/migrate_legacy_py.sh"
+  migrate_legacy_agent "$LEGACY_DIR" "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"
+else
+  echo "警告: 无法拉取迁移脚本，跳过旧版 Python 清理（若为全新安装可忽略）"
+fi
+
 VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
   echo "错误: 无法读取 ${VERSION_URL}"
   exit 1
@@ -63,14 +90,10 @@ if [ -z "$MASTER_VERSION" ] || ! [[ "$MASTER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+
   echo "错误: version.txt 中 MASTER_VERSION 无效: '${MASTER_VERSION}'"
   exit 1
 fi
-# Release 资产挂在 MASTER_VERSION 对应 tag 下；deb 文件名使用 AGENT_VERSION
 TAG="v${MASTER_VERSION}"
 DEB_NAME="ip-sentinel-agent_${AGENT_VERSION}_${DEB_ARCH}.deb"
 URL="${RELEASE_BASE}/${TAG}/${DEB_NAME}"
 echo "version.txt => MASTER_VERSION=${MASTER_VERSION} AGENT_VERSION=${AGENT_VERSION} (tag ${TAG})"
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 echo "检查通过: ${PRETTY_NAME:-linux} / ${DEB_ARCH} / ${DEB_NAME}"
 echo "下载 ${URL} ..."
@@ -99,7 +122,6 @@ fi
 
 mkdir -p "$CONF_DIR" "$DATA_DIR" "$DATA_DIR/core" "$DATA_DIR/data" "$LOG_DIR"
 
-# keep install.sh for remote upgrade
 cp -f "$(readlink -f "$0" 2>/dev/null || echo "$0")" "${DATA_DIR}/core/install.sh" 2>/dev/null || true
 chmod +x "${DATA_DIR}/core/install.sh" 2>/dev/null || true
 
@@ -109,26 +131,27 @@ fi
 
 UPGRADE=false
 [ -f "$CONF" ] && UPGRADE=true
-if [ "${SILENT_AGENT_OTA:-}" = "true" ] && [ -f "$CONF" ]; then
+[ -f "${LEGACY_DIR}/config.conf" ] && UPGRADE=true
+if [ "${SILENT_AGENT_OTA:-}" = "true" ]; then
   UPGRADE=true
 fi
 
 if [ "$UPGRADE" = false ]; then
   if [ -z "${TG_TOKEN:-}" ]; then
-    read -r -p "Telegram Bot Token: " TG_TOKEN
+    prompt TG_TOKEN "Telegram Bot Token: " || exit 1
   fi
   if [ -z "${CHAT_ID:-}" ]; then
-    read -r -p "Chat ID: " CHAT_ID
+    prompt CHAT_ID "Chat ID: " || exit 1
   fi
   if [ -z "${MASTER_BASE_URL:-}" ]; then
-    read -r -p "控制端公网 BASE URL (例 https://master.example.com): " MASTER_BASE_URL
+    prompt MASTER_BASE_URL "控制端公网 BASE URL (例 https://master.example.com): " || exit 1
   fi
   if [ -z "${REGION_CODE:-}" ]; then
-    read -r -p "区域代码 REGION_CODE [UNKNOWN]: " REGION_CODE
+    prompt REGION_CODE "区域代码 REGION_CODE [UNKNOWN]: " || exit 1
     REGION_CODE="${REGION_CODE:-UNKNOWN}"
   fi
   [ -n "${TG_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && [ -n "${MASTER_BASE_URL:-}" ] || {
-    echo "必填项缺失"
+    echo "必填项缺失。非交互安装可: TG_TOKEN=... CHAT_ID=... MASTER_BASE_URL=... bash -c \"\$(curl -fsSL ${REPO_RAW}/core/install.sh)\""
     exit 1
   }
   cat > "$CONF" <<EOF
@@ -147,14 +170,45 @@ EOF
   echo "已写入 ${CONF}"
   echo "注册消息示例（发给 Bot）: #REGISTER#|NODE|IP|${REGION_CODE}|ALIAS|true"
 else
-  if ! grep -q '^MASTER_BASE_URL=' "$CONF"; then
-    read -r -p "现有配置缺少 MASTER_BASE_URL，请输入: " MASTER_BASE_URL
-    echo "MASTER_BASE_URL=\"${MASTER_BASE_URL}\"" >> "$CONF"
+  if [ ! -f "$CONF" ] && [ -f "${LEGACY_DIR}/config.conf" ]; then
+    cp -a "${LEGACY_DIR}/config.conf" "$CONF"
   fi
-  if grep -q '^AGENT_VERSION=' "$CONF"; then
-    sed -i "s|^AGENT_VERSION=.*|AGENT_VERSION=\"${AGENT_VERSION}\"|" "$CONF" || true
+  if [ -f "$CONF" ]; then
+    if grep -q '^AGENT_VERSION=' "$CONF"; then
+      sed -i "s|^AGENT_VERSION=.*|AGENT_VERSION=\"${AGENT_VERSION}\"|" "$CONF" || true
+    else
+      echo "AGENT_VERSION=\"${AGENT_VERSION}\"" >> "$CONF"
+    fi
+    if grep -q '^INSTALL_DIR=' "$CONF"; then
+      sed -i "s|^INSTALL_DIR=.*|INSTALL_DIR=\"${DATA_DIR}\"|" "$CONF" || true
+    else
+      echo "INSTALL_DIR=\"${DATA_DIR}\"" >> "$CONF"
+    fi
+    if grep -q '^LOG_FILE=' "$CONF"; then
+      sed -i "s|^LOG_FILE=.*|LOG_FILE=\"${LOG_DIR}/sentinel.log\"|" "$CONF" || true
+    else
+      echo "LOG_FILE=\"${LOG_DIR}/sentinel.log\"" >> "$CONF"
+    fi
+    if ! grep -q '^MASTER_BASE_URL=' "$CONF" || [ -z "$(awk -F= '/^MASTER_BASE_URL=/{print $2}' "$CONF" | tr -d '\"' )" ]; then
+      mip="$(awk -F= '/^MASTER_PUBLIC_IP=/{print $2; exit}' "$CONF" | tr -d '\r" '"'"'')"
+      if [ -n "$mip" ]; then
+        if grep -q '^MASTER_BASE_URL=' "$CONF"; then
+          sed -i "s|^MASTER_BASE_URL=.*|MASTER_BASE_URL=\"https://${mip}:19530\"|" "$CONF" || true
+        else
+          echo "MASTER_BASE_URL=\"https://${mip}:19530\"" >> "$CONF"
+        fi
+        echo "已根据 MASTER_PUBLIC_IP 补全 MASTER_BASE_URL"
+      elif [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
+        if [ -z "${MASTER_BASE_URL:-}" ]; then
+          prompt MASTER_BASE_URL "现有配置缺少 MASTER_BASE_URL，请输入: " || exit 1
+        fi
+        echo "MASTER_BASE_URL=\"${MASTER_BASE_URL}\"" >> "$CONF"
+      else
+        echo "警告: 静默升级缺少 MASTER_BASE_URL，节点可能无法连接控制端"
+      fi
+    fi
   fi
-  echo "升级模式：保留现有 ${CONF}"
+  echo "升级/迁移模式：保留配置 ${CONF}"
 fi
 
 if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
@@ -169,4 +223,4 @@ else
   echo "警告: 无 systemd，请手动运行节点进程"
 fi
 
-echo "节点安装完成。"
+echo "节点安装完成（Go/deb）。"
