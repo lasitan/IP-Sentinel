@@ -76,6 +76,33 @@ EOF
   fi
 }
 
+truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 保留现有 master.conf，仅补齐必要键并更新版本
+keep_master_conf() {
+  local conf="$1" data_dir="$2" token="$3" ver="${4:-}"
+  mkdir -p "$(dirname "$conf")"
+  if [ ! -f "$conf" ]; then
+    write_master_conf_minimal "$conf" "$data_dir" "$token" "$ver"
+    return
+  fi
+  migrate_conf_key_set "$conf" "TG_TOKEN" "$token"
+  migrate_conf_key_set "$conf" "MASTER_DIR" "$data_dir"
+  migrate_conf_key_set "$conf" "DB_FILE" "${data_dir}/sentinel.db"
+  [ -n "$(migrate_conf_get "$conf" LISTEN_ADDR)" ] || migrate_conf_key_set "$conf" "LISTEN_ADDR" "127.0.0.1:19530"
+  [ -n "$(migrate_conf_get "$conf" TG_MODE)" ] || migrate_conf_key_set "$conf" "TG_MODE" "polling"
+  [ -n "$(migrate_conf_get "$conf" IS_OFFICIAL_GATEWAY)" ] || migrate_conf_key_set "$conf" "IS_OFFICIAL_GATEWAY" "false"
+  [ -n "$(migrate_conf_get "$conf" ENABLE_MASTER_OTA)" ] || migrate_conf_key_set "$conf" "ENABLE_MASTER_OTA" "false"
+  if [ -n "$ver" ]; then
+    migrate_conf_key_set "$conf" "MASTER_VERSION" "$ver"
+  fi
+}
+
 migrate_legacy_master() {
   local legacy="${1:-/opt/ip_sentinel_master}"
   local conf_dir="${2:-/etc/ip-sentinel-master}"
@@ -236,6 +263,16 @@ if [ "${SILENT_MASTER_OTA:-}" = "true" ]; then
   UPGRADE=true
 fi
 
+# 已有 PUBLIC_BASE_URL 时默认 KEEP_CONFIG；可用 KEEP_CONFIG=false 强制精简重置
+KEEP_CONFIG="${KEEP_CONFIG:-}"
+if [ -z "$KEEP_CONFIG" ]; then
+  if [ -f "$CONF" ] && [ -n "$(migrate_conf_get "$CONF" PUBLIC_BASE_URL)" ]; then
+    KEEP_CONFIG=true
+  else
+    KEEP_CONFIG=false
+  fi
+fi
+
 if [ "$UPGRADE" = false ]; then
   if [ -z "${TG_TOKEN:-}" ]; then
     prompt TG_TOKEN "Telegram Bot Token: " || exit 1
@@ -246,7 +283,7 @@ if [ "$UPGRADE" = false ]; then
   }
   write_master_conf_minimal "$CONF" "$DATA_DIR" "$TG_TOKEN" "$MASTER_VERSION"
   echo "已写入 ${CONF}"
-  echo "提示: 启动后对 Bot 发送 /nginx（https 域名 + Let's Encrypt）；Telegram 连通前使用 HTTP 轮询。"
+  echo "提示: 启动后对 Bot 发送 /nginx；Telegram 连通前使用 HTTP 轮询。"
   echo "节点 MASTER_BASE_URL 须为 https://域名（禁止 IP/自签）。"
 else
   token="$(migrate_conf_get "$CONF" "TG_TOKEN")"
@@ -258,9 +295,15 @@ else
     token="${TG_TOKEN}"
   fi
   [ -n "$token" ] || { echo "Token 不能为空"; exit 1; }
-  write_master_conf_minimal "$CONF" "$DATA_DIR" "$token" "$MASTER_VERSION"
-  echo "升级模式：仅保留 TG_TOKEN，已重置为 TG_MODE=polling"
-  echo "  请发送 /nginx 重新配置 https 域名；勿使用 IP 或自签证书"
+  if truthy "$KEEP_CONFIG"; then
+    keep_master_conf "$CONF" "$DATA_DIR" "$token" "$MASTER_VERSION"
+    echo "升级模式：KEEP_CONFIG=true，已保留 PUBLIC_BASE_URL / TG_MODE / WEBHOOK / FORUM 等配置"
+    echo "  仅更新 MASTER_VERSION=${MASTER_VERSION}"
+  else
+    write_master_conf_minimal "$CONF" "$DATA_DIR" "$token" "$MASTER_VERSION"
+    echo "升级模式：KEEP_CONFIG=false，仅保留 TG_TOKEN，已重置为 TG_MODE=polling"
+    echo "  请发送 /nginx 重新配置 https 域名；勿使用 IP 或自签证书"
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then

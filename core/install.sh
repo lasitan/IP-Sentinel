@@ -51,6 +51,28 @@ conf_get() {
   printf '%s\n' "$line" | sed -E "s/^[[:space:]]*${key}=//" | sed -E 's/\r$//; s/^"//; s/"$//'
 }
 
+conf_set() {
+  local file="$1" key="$2" val="$3"
+  local line="${key}=\"${val}\""
+  mkdir -p "$(dirname "$file")"
+  if [ ! -f "$file" ]; then
+    echo "$line" >> "$file"
+    return
+  fi
+  if grep -qE "^[[:space:]]*${key}=" "$file"; then
+    sed -i -E "s|^[[:space:]]*${key}=.*|${line}|" "$file"
+  else
+    echo "$line" >> "$file"
+  fi
+}
+
+truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "错误: 需要 root 权限"
   exit 1
@@ -153,7 +175,7 @@ if [ ! -f "${DATA_DIR}/data/map.json" ]; then
   curl -fsSL "${DATA_RAW}/data/map.json" -o "${DATA_DIR}/data/map.json" || true
 fi
 
-# 仅信任旧配置中的 TG_TOKEN / CHAT_ID / REGION_CODE
+# 读取已有 / 旧配置
 TG_TOKEN="${TG_TOKEN:-$(conf_get "$CONF" TG_TOKEN)}"
 [ -z "${TG_TOKEN}" ] && TG_TOKEN="$(conf_get "${LEGACY_DIR}/config.conf" TG_TOKEN)"
 CHAT_ID="${CHAT_ID:-$(conf_get "$CONF" CHAT_ID)}"
@@ -161,40 +183,84 @@ CHAT_ID="${CHAT_ID:-$(conf_get "$CONF" CHAT_ID)}"
 REGION_CODE="${REGION_CODE:-$(conf_get "$CONF" REGION_CODE)}"
 [ -z "${REGION_CODE}" ] && REGION_CODE="$(conf_get "${LEGACY_DIR}/config.conf" REGION_CODE)"
 REGION_CODE="${REGION_CODE:-UNKNOWN}"
+EXISTING_BASE="$(conf_get "$CONF" MASTER_BASE_URL)"
+if [ -z "${MASTER_BASE_URL:-}" ] && [ -n "$EXISTING_BASE" ]; then
+  MASTER_BASE_URL="$EXISTING_BASE"
+fi
 
-if [ -z "${TG_TOKEN:-}" ]; then
-  prompt TG_TOKEN "Telegram Bot Token: " || exit 1
-fi
-if [ -z "${CHAT_ID:-}" ]; then
-  prompt CHAT_ID "Chat ID: " || exit 1
-fi
-if [ -z "${REGION_CODE:-}" ]; then
-  if [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
-    prompt REGION_CODE "区域代码 REGION_CODE [UNKNOWN]: " || true
+# 已有合法完整配置时默认 KEEP_CONFIG（可用 KEEP_CONFIG=false 强制重配）
+KEEP_CONFIG="${KEEP_CONFIG:-}"
+if [ -z "$KEEP_CONFIG" ]; then
+  if [ -n "${TG_TOKEN}" ] && [ -n "${CHAT_ID}" ] && [ -n "${MASTER_BASE_URL:-}" ] \
+    && require_https_domain "${MASTER_BASE_URL}" >/dev/null 2>&1; then
+    KEEP_CONFIG=true
+  else
+    KEEP_CONFIG=false
   fi
-  REGION_CODE="${REGION_CODE:-UNKNOWN}"
 fi
 
-# MASTER_BASE_URL 一律重配（不信任旧 IP / 自签）
-NEED_BASE=true
-if [ -n "${MASTER_BASE_URL:-}" ] && require_https_domain "${MASTER_BASE_URL}"; then
-  NEED_BASE=false
-fi
-if [ "$NEED_BASE" = true ]; then
-  if [ "${SILENT_AGENT_OTA:-}" = "true" ]; then
-    echo "错误: 静默升级须提供 MASTER_BASE_URL=https://域名（禁止 IP）"
+DO_REGISTER=false
+if truthy "$KEEP_CONFIG"; then
+  echo "升级模式：保留现有配置（KEEP_CONFIG=true）"
+  if [ -z "${TG_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ] || [ -z "${MASTER_BASE_URL:-}" ]; then
+    echo "错误: KEEP_CONFIG 需要已有 TG_TOKEN / CHAT_ID / MASTER_BASE_URL"
     exit 1
   fi
-  prompt MASTER_BASE_URL "控制端 BASE URL (必须 https://域名，禁止 IP): " || exit 1
   require_https_domain "${MASTER_BASE_URL}" || exit 1
-fi
+  conf_set "$CONF" "TG_TOKEN" "$TG_TOKEN"
+  conf_set "$CONF" "CHAT_ID" "$CHAT_ID"
+  conf_set "$CONF" "MASTER_BASE_URL" "$MASTER_BASE_URL"
+  conf_set "$CONF" "INSTALL_DIR" "$DATA_DIR"
+  conf_set "$CONF" "AGENT_VERSION" "$AGENT_VERSION"
+  conf_set "$CONF" "REGION_CODE" "$REGION_CODE"
+  conf_set "$CONF" "LOG_FILE" "${LOG_DIR}/sentinel.log"
+  # 缺省开关仅在缺失时补齐，不覆盖用户已改值
+  [ -n "$(conf_get "$CONF" ENABLE_GOOGLE)" ] || conf_set "$CONF" "ENABLE_GOOGLE" "true"
+  [ -n "$(conf_get "$CONF" ENABLE_TRUST)" ] || conf_set "$CONF" "ENABLE_TRUST" "true"
+  [ -n "$(conf_get "$CONF" ENABLE_MAPS_GEO)" ] || conf_set "$CONF" "ENABLE_MAPS_GEO" "true"
+  [ -n "$(conf_get "$CONF" ENABLE_OTA)" ] || conf_set "$CONF" "ENABLE_OTA" "true"
+  echo "已更新 ${CONF}（保留 NODE_NAME/ALIAS/ENABLE_*/THREAD 等字段）"
+  if truthy "${FORCE_REGISTER:-}"; then
+    DO_REGISTER=true
+  else
+    echo "跳过自动注册（升级默认不重复注册；需要时设 FORCE_REGISTER=1）"
+  fi
+else
+  if [ -z "${TG_TOKEN:-}" ]; then
+    prompt TG_TOKEN "Telegram Bot Token: " || exit 1
+  fi
+  if [ -z "${CHAT_ID:-}" ]; then
+    prompt CHAT_ID "Chat ID: " || exit 1
+  fi
+  if [ -z "${REGION_CODE:-}" ] || [ "${REGION_CODE}" = "UNKNOWN" ]; then
+    if [ "${SILENT_AGENT_OTA:-}" != "true" ] && [ -z "$(conf_get "$CONF" REGION_CODE)" ]; then
+      prompt REGION_CODE "区域代码 REGION_CODE [UNKNOWN]: " || true
+    fi
+    REGION_CODE="${REGION_CODE:-UNKNOWN}"
+  fi
 
-[ -n "${TG_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && [ -n "${MASTER_BASE_URL:-}" ] || {
-  echo "必填项缺失。例: TG_TOKEN=... CHAT_ID=... MASTER_BASE_URL=https://master.example.com REGION_CODE=SG"
-  exit 1
-}
+  NEED_BASE=true
+  if [ -n "${MASTER_BASE_URL:-}" ] && require_https_domain "${MASTER_BASE_URL}"; then
+    NEED_BASE=false
+  fi
+  if [ "$NEED_BASE" = true ]; then
+    if [ "${SILENT_AGENT_OTA:-}" = "true" ]; then
+      echo "错误: 静默升级须提供 MASTER_BASE_URL=https://域名（禁止 IP）"
+      exit 1
+    fi
+    prompt MASTER_BASE_URL "控制端 BASE URL (必须 https://域名，禁止 IP): " || exit 1
+    require_https_domain "${MASTER_BASE_URL}" || exit 1
+  fi
 
-cat > "$CONF" <<EOF
+  [ -n "${TG_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && [ -n "${MASTER_BASE_URL:-}" ] || {
+    echo "必填项缺失。例: TG_TOKEN=... CHAT_ID=... MASTER_BASE_URL=https://master.example.com REGION_CODE=SG"
+    exit 1
+  }
+
+  # 全新/重配：写基础配置，保留已有 NODE_* 若存在
+  PREV_NODE="$(conf_get "$CONF" NODE_NAME)"
+  PREV_ALIAS="$(conf_get "$CONF" NODE_ALIAS)"
+  cat > "$CONF" <<EOF
 TG_TOKEN="${TG_TOKEN}"
 CHAT_ID="${CHAT_ID}"
 MASTER_BASE_URL="${MASTER_BASE_URL}"
@@ -207,7 +273,13 @@ ENABLE_MAPS_GEO="true"
 ENABLE_OTA="true"
 LOG_FILE="${LOG_DIR}/sentinel.log"
 EOF
-echo "已写入 ${CONF}（仅信任 Token/ChatID/地区；MASTER_BASE_URL=${MASTER_BASE_URL}）"
+  [ -n "$PREV_NODE" ] && conf_set "$CONF" "NODE_NAME" "$PREV_NODE"
+  [ -n "$PREV_ALIAS" ] && conf_set "$CONF" "NODE_ALIAS" "$PREV_ALIAS"
+  echo "已写入 ${CONF}（MASTER_BASE_URL=${MASTER_BASE_URL}）"
+  if [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
+    DO_REGISTER=true
+  fi
+fi
 
 # 清理旧 Python Playwright 浏览器，并确保系统 Chromium 可用
 if declare -F purge_playwright_browsers >/dev/null 2>&1; then
@@ -235,7 +307,6 @@ ensure_chromium() {
 }
 ensure_chromium || true
 
-# 解析公网 IP / 节点名，向 Bot 发送注册请求（由控制端弹出确认按钮，不在终端确认）
 detect_public_ip() {
   local ip=""
   ip="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
@@ -244,23 +315,31 @@ detect_public_ip() {
   printf '%s' "$(echo "$ip" | tr -d '[:space:]')"
 }
 
-if [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
+# 向主控 POST /v1/register，由主控发确认按钮（勿用 Bot 自发 #REGISTER#，主控收不到自己的消息）
+if [ "$DO_REGISTER" = true ]; then
   PUBLIC_IP="$(detect_public_ip)"
   HOST_RAW="$(hostname 2>/dev/null || echo node)"
   HOST_SAFE="$(printf '%s' "$HOST_RAW" | tr -cd 'A-Za-z0-9' | cut -c1-10)"
   [ -n "$HOST_SAFE" ] || HOST_SAFE="node"
   IP_HASH="$(printf '%s' "${PUBLIC_IP:-127.0.0.1}" | md5sum 2>/dev/null | awk '{print substr($1,1,4)}')"
   [ -n "$IP_HASH" ] || IP_HASH="0000"
-  NODE_NAME="${HOST_SAFE}-${IP_HASH}"
-  NODE_ALIAS="${HOST_RAW}"
-  NODE_ALIAS="$(printf '%s' "$NODE_ALIAS" | cut -c1-30)"
+  NODE_NAME="$(conf_get "$CONF" NODE_NAME)"
+  [ -n "$NODE_NAME" ] || NODE_NAME="${HOST_SAFE}-${IP_HASH}"
+  NODE_ALIAS="$(conf_get "$CONF" NODE_ALIAS)"
+  [ -n "$NODE_ALIAS" ] || NODE_ALIAS="$(printf '%s' "$HOST_RAW" | cut -c1-30)"
+  conf_set "$CONF" "NODE_NAME" "$NODE_NAME"
+  conf_set "$CONF" "NODE_ALIAS" "$NODE_ALIAS"
   REG_MSG="#REGISTER#|${NODE_NAME}|${PUBLIC_IP}|${REGION_CODE}|${NODE_ALIAS}|true"
-  if curl -fsS --max-time 20 -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-    --data-urlencode "chat_id=${CHAT_ID}" \
-    --data-urlencode "text=${REG_MSG}" >/dev/null; then
-    echo "已向 Telegram 发送注册请求，请在 Bot 对话中点击「确认注册」。"
+  BASE_TRIM="$(printf '%s' "${MASTER_BASE_URL}" | sed 's|/*$||')"
+  REG_JSON="$(printf '{"chat_id":"%s","node":"%s","ip":"%s","region":"%s","alias":"%s","ota":"true"}' \
+    "$CHAT_ID" "$NODE_NAME" "$PUBLIC_IP" "$REGION_CODE" "$NODE_ALIAS")"
+  if curl -fsS --max-time 25 -X POST "${BASE_TRIM}/v1/register" \
+    -H "Authorization: Bearer ${TG_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$REG_JSON" >/dev/null; then
+    echo "已向控制端提交注册请求，请在 Telegram Bot 中点击「确认注册」。"
   else
-    echo "警告: 自动发送注册请求失败。请私聊 Bot 发送："
+    echo "警告: POST /v1/register 失败（主控需 >=5.0.11 且公网可达）。可私聊 Bot 发送："
     echo "  ${REG_MSG}"
   fi
 fi

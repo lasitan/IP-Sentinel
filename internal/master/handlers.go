@@ -439,6 +439,44 @@ func (h *Handlers) handleRegisterPrompt(owner, text, dest string, threadID int) 
 		_, _ = h.tg.SendMessage(dest, "❌ "+err.Error(), false, threadID)
 		return
 	}
+	if err := h.promptRegister(owner, dest, node, ip, region, alias, ota, threadID); err != nil {
+		log.Printf("[master] register prompt: %v", err)
+		_, _ = h.tg.SendMessage(dest, "❌ 发送注册确认失败: "+err.Error(), false, threadID)
+	}
+}
+
+// PromptRegisterFromAPI 供 POST /v1/register 调用：向 chat_id 发送确认按钮。
+func (h *Handlers) PromptRegisterFromAPI(chatID, node, ip, region, alias, ota string) error {
+	owner := SanitizeChatID(chatID)
+	if owner == "" {
+		return fmt.Errorf("chat_id 无效")
+	}
+	node = SanitizeNodeName(node)
+	ip = SanitizeAgentIP(ip)
+	if region == "" {
+		region = "UNKNOWN"
+	} else {
+		region = SanitizeRegion(region)
+	}
+	if alias == "" {
+		alias = node
+	} else {
+		alias = SanitizeAlias(alias, 30)
+	}
+	ota = strings.ToLower(ota)
+	if ota != "true" && ota != "false" {
+		ota = "false"
+	}
+	if node == "" {
+		return fmt.Errorf("节点名无效")
+	}
+	if ip != "" && IsSSRFIP(ip) {
+		return fmt.Errorf("拒绝注册：IP 不可用（私网/环回）")
+	}
+	return h.promptRegister(owner, owner, node, ip, region, alias, ota, 0)
+}
+
+func (h *Handlers) promptRegister(owner, dest, node, ip, region, alias, ota string, threadID int) error {
 	id := randomHex(8)
 	h.mu.Lock()
 	h.reg[id] = pendingReg{owner: owner, node: node, ip: ip, region: region, alias: alias, ota: ota}
@@ -453,7 +491,15 @@ func (h *Handlers) handleRegisterPrompt(owner, text, dest string, threadID int) 
 			{"text": "❌ 拒绝", "callback_data": "reg_no:" + id},
 		},
 	}
-	_, _ = h.tg.SendUI(dest, body, kb, threadID)
+	_, err := h.tg.SendUI(dest, body, kb, threadID)
+	if err != nil {
+		h.mu.Lock()
+		delete(h.reg, id)
+		h.mu.Unlock()
+		return err
+	}
+	log.Printf("[master] register prompt sent owner=%s node=%s", owner, node)
+	return nil
 }
 
 func (h *Handlers) confirmRegister(owner, dest, id string, msgID, threadID int) {

@@ -45,6 +45,7 @@ func (a *App) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"service":"ip-sentinel-master"}`))
 	})
+	mux.HandleFunc("/v1/register", a.handleRegisterAPI)
 	mux.HandleFunc("/tg", a.handleWebhook)
 	mux.Handle("/ws", a.Hub)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +57,54 @@ func (a *App) Handler() http.Handler {
 		_, _ = w.Write([]byte("IP-Sentinel Master"))
 	})
 	return mux
+}
+
+type registerAPIBody struct {
+	ChatID string `json:"chat_id"`
+	Node   string `json:"node"`
+	IP     string `json:"ip"`
+	Region string `json:"region"`
+	Alias  string `json:"alias"`
+	OTA    string `json:"ota"`
+}
+
+func (a *App) handleRegisterAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	auth := r.Header.Get("Authorization")
+	token := ""
+	if len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
+		token = strings.TrimSpace(auth[7:])
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.Header.Get("X-TG-Token"))
+	}
+	if token == "" || token != a.Cfg.TGToken {
+		log.Printf("[master] /v1/register 拒绝：token 无效")
+		http.Error(w, `{"ok":false,"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		http.Error(w, `{"ok":false,"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	var body registerAPIBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		http.Error(w, `{"ok":false,"error":"bad json"}`, http.StatusBadRequest)
+		return
+	}
+	if err := a.Handlers.PromptRegisterFromAPI(body.ChatID, body.Node, body.IP, body.Region, body.Alias, body.OTA); err != nil {
+		log.Printf("[master] /v1/register failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error":` + strconv.Quote(err.Error()) + `}`))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
