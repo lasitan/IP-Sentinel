@@ -29,6 +29,17 @@ func NewTelegram(token string) *Telegram {
 	}
 }
 
+func redactTGURL(s string) string {
+	// 避免 journal 打出完整 bot token
+	if i := strings.Index(s, "/bot"); i >= 0 {
+		rest := s[i+4:]
+		if j := strings.IndexByte(rest, '/'); j > 0 {
+			return s[:i+4] + "***" + rest[j:]
+		}
+	}
+	return s
+}
+
 func (t *Telegram) Call(method string, payload map[string]any) (map[string]any, error) {
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequest(http.MethodPost, t.base+"/"+method, bytes.NewReader(body))
@@ -119,9 +130,10 @@ func (t *Telegram) GetUpdates(offset int, timeout int) ([]map[string]any, error)
 	q.Set("allowed_updates", `["message","callback_query","my_chat_member"]`)
 	// 长轮询：HTTP 客户端超时需大于 Telegram timeout
 	client := &http.Client{Timeout: time.Duration(timeout+15) * time.Second}
-	resp, err := client.Get(t.base + "/getUpdates?" + q.Encode())
+	u := t.base + "/getUpdates?" + q.Encode()
+	resp, err := client.Get(u)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s", redactTGURL(err.Error()))
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -287,7 +299,12 @@ func ExtractUpdate(update map[string]any) (chatID, text, cbID string, msgID, thr
 		}
 	}
 	if chat != nil {
-		chatID = fmt.Sprint(chat["id"])
+		if id, ok := chat["id"]; ok && id != nil {
+			chatID = fmt.Sprint(id)
+			if chatID == "<nil>" {
+				chatID = ""
+			}
+		}
 	}
 	text = strings.TrimSpace(text)
 	return

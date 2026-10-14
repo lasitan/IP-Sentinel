@@ -79,10 +79,17 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
+	// 必须像真实 Telegram Update（含 update_id），避免对本机 /tg 的探测 POST
+	// 误触发「已切 webhook + 停止轮询」，导致之后完全收不到消息。
+	if _, ok := update["update_id"]; !ok {
+		log.Printf("[master] webhook 忽略非 Telegram update（无 update_id）")
+		http.Error(w, "bad update", http.StatusBadRequest)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"ok":true}`))
 
-	if a.tgInbound.CompareAndSwap(false, true) {
+	if a.Cfg.PublicBaseURL != "" && a.tgInbound.CompareAndSwap(false, true) {
 		log.Printf("[master] 已收到来自 Telegram 的 HTTPS webhook 入站")
 		_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "webhook"})
 		a.Cfg.TGMode = "webhook"
@@ -98,6 +105,7 @@ func (a *App) processUpdate(update map[string]any) {
 		}
 	}()
 	chatID, text, cbID, msgID, threadID, userMsgID, replyTo := ExtractUpdate(update)
+	chatID = SanitizeChatID(chatID)
 	if chatID == "" {
 		return
 	}
