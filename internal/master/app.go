@@ -1,6 +1,7 @@
 package master
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -75,7 +76,9 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var update map[string]any
-	if err := json.Unmarshal(raw, &update); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&update); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}

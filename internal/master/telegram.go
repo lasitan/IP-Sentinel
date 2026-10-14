@@ -142,7 +142,9 @@ func (t *Telegram) GetUpdates(offset int, timeout int) ([]map[string]any, error)
 		Result      []map[string]any `json:"result"`
 		Description string           `json:"description"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
 	if !out.OK {
@@ -270,6 +272,32 @@ func truncate(s string, n int) string {
 	return string(r[:n])
 }
 
+// formatChatID renders a Telegram chat id without scientific notation.
+// json.Unmarshal into map[string]any uses float64; fmt.Sprint then yields
+// "7.617414857e+09", and SanitizeChatID would glue digits into a wrong id.
+func formatChatID(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case json.Number:
+		return SanitizeChatID(t.String())
+	case float64:
+		return strconv.FormatInt(int64(t), 10)
+	case float32:
+		return strconv.FormatInt(int64(t), 10)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case int:
+		return strconv.Itoa(t)
+	case int32:
+		return strconv.FormatInt(int64(t), 10)
+	case string:
+		return SanitizeChatID(t)
+	default:
+		return SanitizeChatID(fmt.Sprint(t))
+	}
+}
+
 // ExtractUpdate parses chat/text/callback fields from a Telegram update.
 func ExtractUpdate(update map[string]any) (chatID, text, cbID string, msgID, threadID, userMsgID int, replyTo string) {
 	msg, _ := update["message"].(map[string]any)
@@ -299,12 +327,7 @@ func ExtractUpdate(update map[string]any) (chatID, text, cbID string, msgID, thr
 		}
 	}
 	if chat != nil {
-		if id, ok := chat["id"]; ok && id != nil {
-			chatID = fmt.Sprint(id)
-			if chatID == "<nil>" {
-				chatID = ""
-			}
-		}
+		chatID = formatChatID(chat["id"])
 	}
 	text = strings.TrimSpace(text)
 	return
