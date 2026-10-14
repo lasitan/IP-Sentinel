@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -72,10 +73,40 @@ func (t *Telegram) Call(method string, payload map[string]any) (map[string]any, 
 	return out, nil
 }
 
-func withThread(payload map[string]any, threadID int) {
-	if threadID > 0 {
+func withThread(payload map[string]any, chatID string, threadID int) {
+	// 仅超级群/论坛可带 message_thread_id；私聊带 thread 会被 Telegram 拒绝
+	if threadID > 0 && strings.HasPrefix(strings.TrimSpace(chatID), "-") {
 		payload["message_thread_id"] = threadID
 	}
+}
+
+// WebhookInfo is a subset of Telegram getWebhookInfo result.
+type WebhookInfo struct {
+	URL                string
+	PendingUpdateCount int
+	LastErrorDate      int64
+	LastErrorMessage   string
+}
+
+func (t *Telegram) GetWebhookInfo() (WebhookInfo, error) {
+	out, err := t.Call("getWebhookInfo", map[string]any{})
+	if err != nil {
+		return WebhookInfo{}, err
+	}
+	res, _ := out["result"].(map[string]any)
+	info := WebhookInfo{
+		URL:                fmt.Sprint(res["url"]),
+		PendingUpdateCount: intFrom(res["pending_update_count"]),
+		LastErrorDate:      int64(intFrom(res["last_error_date"])),
+		LastErrorMessage:   fmt.Sprint(res["last_error_message"]),
+	}
+	if info.URL == "<nil>" {
+		info.URL = ""
+	}
+	if info.LastErrorMessage == "<nil>" {
+		info.LastErrorMessage = ""
+	}
+	return info, nil
 }
 
 func (t *Telegram) GetUpdates(offset int, timeout int) ([]map[string]any, error) {
@@ -114,9 +145,9 @@ func (t *Telegram) GetUpdates(offset int, timeout int) ([]map[string]any, error)
 
 func (t *Telegram) SetWebhook(hookURL, secret string) error {
 	payload := map[string]any{
-		"url":             hookURL,
-		"drop_pending_updates": true,
-		"allowed_updates": []string{"message", "callback_query", "my_chat_member"},
+		"url":                  hookURL,
+		"drop_pending_updates": false,
+		"allowed_updates":      []string{"message", "callback_query", "my_chat_member"},
 	}
 	if secret != "" {
 		payload["secret_token"] = secret
@@ -145,9 +176,10 @@ func (t *Telegram) SendMessage(chatID, text string, markdown bool, threadID int)
 	if markdown {
 		payload["parse_mode"] = "Markdown"
 	}
-	withThread(payload, threadID)
+	withThread(payload, chatID, threadID)
 	out, err := t.Call("sendMessage", payload)
 	if err != nil {
+		log.Printf("[master] sendMessage chat=%s err=%v", chatID, err)
 		return 0, err
 	}
 	res, _ := out["result"].(map[string]any)
@@ -162,9 +194,10 @@ func (t *Telegram) SendUI(chatID, text string, keyboard [][]map[string]string, t
 		"parse_mode":   "Markdown",
 		"reply_markup": map[string]any{"inline_keyboard": keyboard},
 	}
-	withThread(payload, threadID)
+	withThread(payload, chatID, threadID)
 	out, err := t.Call("sendMessage", payload)
 	if err != nil {
+		log.Printf("[master] sendUI chat=%s err=%v", chatID, err)
 		return 0, err
 	}
 	res, _ := out["result"].(map[string]any)

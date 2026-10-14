@@ -64,6 +64,7 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if secret := a.Cfg.WebhookSecret; secret != "" {
 		if r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != secret {
+			log.Printf("[master] webhook 拒绝：secret_token 不匹配")
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -100,6 +101,11 @@ func (a *App) processUpdate(update map[string]any) {
 	if chatID == "" {
 		return
 	}
+	preview := text
+	if len(preview) > 48 {
+		preview = preview[:48] + "…"
+	}
+	log.Printf("[master] tg update chat=%s thread=%d text=%q cb=%v", chatID, threadID, preview, cbID != "")
 	a.Handlers.Dispatch(chatID, text, cbID, msgID, threadID, userMsgID, replyTo)
 }
 
@@ -108,7 +114,7 @@ func (a *App) StartHTTP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{
+	srv := http.Server{
 		Handler:           a.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ConnState: func(c net.Conn, s http.ConnState) {
@@ -133,30 +139,94 @@ func (a *App) StartTG(ctx context.Context) {
 	a.TG.SyncBotCommands()
 	StartFleetScheduler(ctx, a.Handlers)
 
-	// 默认 HTTP 长轮询。仅当 PUBLIC_BASE_URL 为可信 https://域名 且 setWebhook 成功
-	// （Telegram 已能建立到本机的 HTTPS 连接）后才退出轮询、改用 webhook。
-	// 禁止 IP / 自签；校验失败则强制轮询。
-	if a.Cfg.PublicBaseURL != "" {
+	// 默认 HTTP 长轮询。仅当配置明确为 webhook 且 PUBLIC_BASE_URL 可信时才 setWebhook。
+	// 若曾因 webhook 异常回退为 polling，即使仍有 PUBLIC_BASE_URL 也不自动再挂 webhook，
+	// 避免重启后再次卡死；用户可通过 /nginx 重新启用。
+	wantWebhook := a.Cfg.PublicBaseURL != "" && strings.EqualFold(a.Cfg.TGMode, "webhook")
+	if wantWebhook {
 		if err := a.Handlers.EnableWebhookFromConfig(); err != nil {
 			log.Printf("[master] webhook 不可用，使用 HTTP 轮询: %v", err)
 			_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
 			a.Cfg.TGMode = "polling"
 			_ = a.TG.DeleteWebhook()
 		} else {
-			log.Printf("[master] Telegram 已接受 webhook %s/tg，停止轮询", strings.TrimRight(a.Cfg.PublicBaseURL, "/"))
+			log.Printf("[master] Telegram 已接受 webhook %s/tg（若入站失败将自动回退轮询）", strings.TrimRight(a.Cfg.PublicBaseURL, "/"))
 			a.Cfg.TGMode = "webhook"
 			a.polling.Store(false)
+			go a.watchWebhook(ctx)
 			return
 		}
 	} else {
 		_ = a.TG.DeleteWebhook()
-		_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
+		if !strings.EqualFold(a.Cfg.TGMode, "polling") {
+			_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
+		}
 		a.Cfg.TGMode = "polling"
+		if a.Cfg.PublicBaseURL != "" {
+			log.Printf("[master] 保持 HTTP 轮询（TG_MODE=polling；公网已配置，可用 /nginx 重新启用 webhook）")
+		}
 	}
 
+	a.startPolling(ctx)
+}
+
+func (a *App) startPolling(ctx context.Context) {
+	if a.polling.Load() {
+		return
+	}
+	a.pollStop = make(chan struct{})
 	a.polling.Store(true)
 	log.Printf("[master] TG HTTP 轮询已启动（请用 /nginx 配置 https://域名；Telegram 连通前不使用 webhook）")
 	go a.pollLoop(ctx)
+}
+
+func (a *App) fallbackToPolling(ctx context.Context) {
+	_ = a.TG.DeleteWebhook()
+	_ = a.Cfg.SaveKeys(map[string]string{"TG_MODE": "polling"})
+	a.Cfg.TGMode = "polling"
+	a.tgInbound.Store(false)
+	a.StopPolling()
+	// 稍等让旧 pollLoop 退出后再起
+	time.Sleep(200 * time.Millisecond)
+	a.startPolling(ctx)
+}
+
+func (a *App) watchWebhook(ctx context.Context) {
+	started := time.Now()
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if a.Cfg.TGMode != "webhook" {
+				return
+			}
+			if a.tgInbound.Load() {
+				// 已证实可达，停止巡检
+				return
+			}
+			info, err := a.TG.GetWebhookInfo()
+			if err != nil {
+				log.Printf("[master] getWebhookInfo: %v", err)
+				continue
+			}
+			if info.URL == "" {
+				log.Printf("[master] webhook 已被清除，回退轮询")
+				a.fallbackToPolling(ctx)
+				return
+			}
+			unhealthy := info.LastErrorMessage != "" && info.LastErrorDate > 0
+			stuck := info.PendingUpdateCount > 0 && time.Since(started) > 90*time.Second
+			if unhealthy || stuck {
+				log.Printf("[master] webhook 异常，回退轮询: last_error=%q pending=%d",
+					info.LastErrorMessage, info.PendingUpdateCount)
+				a.fallbackToPolling(ctx)
+				return
+			}
+		}
+	}
 }
 
 func (a *App) pollLoop(ctx context.Context) {
@@ -167,14 +237,23 @@ func (a *App) pollLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			a.polling.Store(false)
 			return
 		case <-a.pollStop:
+			a.polling.Store(false)
 			return
 		default:
 		}
-		if a.Cfg.TGMode == "webhook" {
+		if a.Cfg.TGMode == "webhook" && a.tgInbound.Load() {
 			log.Printf("[master] 停止轮询，已进入 webhook")
 			a.polling.Store(false)
+			return
+		}
+		// 配置刚切到 webhook 但尚未证实入站：继续轮询会 Conflict，应退出并交给 watchWebhook
+		if a.Cfg.TGMode == "webhook" {
+			log.Printf("[master] 停止轮询，等待 webhook 入站确认")
+			a.polling.Store(false)
+			go a.watchWebhook(ctx)
 			return
 		}
 		offset := 0
@@ -183,8 +262,25 @@ func (a *App) pollLoop(ctx context.Context) {
 		}
 		updates, err := a.TG.GetUpdates(offset, 25)
 		if err != nil {
-			// 长轮询空闲超时属正常；网络不可达需退避，避免刷屏
 			errStr := err.Error()
+			// 意外残留 webhook：清掉后继续轮询
+			if strings.Contains(errStr, "Conflict") || strings.Contains(strings.ToLower(errStr), "webhook") {
+				if c2, err2 := LoadConfig(a.Cfg.Path); err2 == nil {
+					a.Cfg.TGMode = c2.TGMode
+					a.Cfg.PublicBaseURL = c2.PublicBaseURL
+					a.Cfg.WebhookSecret = c2.WebhookSecret
+				}
+				if a.Cfg.TGMode == "webhook" {
+					log.Printf("[master] getUpdates conflict（webhook 模式），停止轮询")
+					a.polling.Store(false)
+					go a.watchWebhook(ctx)
+					return
+				}
+				log.Printf("[master] getUpdates conflict，清除残留 webhook 后继续轮询")
+				_ = a.TG.DeleteWebhook()
+				backoff = 2 * time.Second
+				continue
+			}
 			transient := strings.Contains(errStr, "timeout") ||
 				strings.Contains(errStr, "Timeout") ||
 				strings.Contains(errStr, "deadline") ||
@@ -204,8 +300,10 @@ func (a *App) pollLoop(ctx context.Context) {
 			}
 			select {
 			case <-ctx.Done():
+				a.polling.Store(false)
 				return
 			case <-a.pollStop:
+				a.polling.Store(false)
 				return
 			case <-time.After(wait):
 			}
@@ -239,4 +337,5 @@ func (a *App) StopPolling() {
 	default:
 		close(a.pollStop)
 	}
+	a.polling.Store(false)
 }
