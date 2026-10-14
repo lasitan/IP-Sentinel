@@ -738,19 +738,25 @@ func (h *Handlers) handleNginxWizard(owner, text, st, dest string, threadID int)
 		h.mu.Lock()
 		h.nginx[owner] = "domain:" + domain
 		h.mu.Unlock()
-		_, _ = h.tg.SendMessage(dest, "可选：回复邮箱用于 Let's Encrypt（或发送 `-` 跳过）", false, threadID)
+		_, _ = h.tg.SendMessage(dest,
+			"下一步：\n"+
+				"• 发送 `-` → *仅 80 + WebSocket*（不申请证书，适合 Cloudflare 回源）\n"+
+				"• 或回复邮箱 → 本机申请 Let's Encrypt 并启用 443\n"+
+				"发送 `cancel` 取消。",
+			true, threadID)
 	default:
 		domain := strings.TrimPrefix(st, "domain:")
-		email := text
-		if email == "-" {
-			email = ""
+		enableTLS := !strings.EqualFold(text, "-")
+		email := ""
+		if enableTLS {
+			email = text
 		}
 		h.mu.Lock()
 		delete(h.nginx, owner)
 		h.mu.Unlock()
 
 		if protocol.IsIPHost(domain) {
-			_, _ = h.tg.SendMessage(dest, "❌ 不支持 IP，请使用域名 + Let's Encrypt", false, threadID)
+			_, _ = h.tg.SendMessage(dest, "❌ 不支持 IP，请使用域名", false, threadID)
 			return
 		}
 
@@ -758,35 +764,45 @@ func (h *Handlers) handleNginxWizard(owner, text, st, dest string, threadID int)
 		if !strings.Contains(h.cfg.ListenAddr, "://") {
 			upstream = "http://" + h.cfg.ListenAddr
 		}
-		msg, err := DeployNginx(domain, upstream, email, true)
+		msg, err := DeployNginx(domain, upstream, email, enableTLS)
 		if err != nil {
 			_, _ = h.tg.SendMessage(dest, "❌ "+err.Error(), false, threadID)
 			return
 		}
+
+		// 对外仍用 https://（Telegram webhook / Agent WSS 要求）；本机可仅 80 由 CDN 终结 TLS
 		base := "https://" + domain
 		if err := protocol.ValidateSecureHTTPSURL(base); err != nil {
-			_, _ = h.tg.SendMessage(dest, "❌ "+err.Error(), false, threadID)
+			_, _ = h.tg.SendMessage(dest, msg+"\n⚠️ "+err.Error(), false, threadID)
 			return
 		}
+		_ = h.cfg.SaveKeys(map[string]string{"PUBLIC_BASE_URL": base})
+		h.cfg.PublicBaseURL = base
+
 		secret := h.cfg.WebhookSecret
 		if secret == "" {
 			secret = randomHex(16)
 		}
 		hook := strings.TrimRight(base, "/") + "/tg"
 		if err := h.tg.SetWebhook(hook, secret); err != nil {
-			_, _ = h.tg.SendMessage(dest, msg+"\n⚠️ setWebhook 失败（仍保持 HTTP 轮询）: "+err.Error(), false, threadID)
+			_ = h.cfg.SaveKeys(map[string]string{"TG_MODE": "polling", "WEBHOOK_SECRET": secret})
+			h.cfg.TGMode = "polling"
+			h.cfg.WebhookSecret = secret
+			_, _ = h.tg.SendMessage(dest, msg+
+				"\n⚠️ setWebhook 失败（保持 HTTP 轮询）: "+err.Error()+
+				"\nAgent 可配置 `MASTER_BASE_URL="+base+"`（需公网 HTTPS/WSS 可达）", true, threadID)
 			return
 		}
 		_ = h.cfg.SaveKeys(map[string]string{
-			"PUBLIC_BASE_URL": base,
-			"WEBHOOK_SECRET":  secret,
-			"TG_MODE":         "webhook",
+			"WEBHOOK_SECRET": secret,
+			"TG_MODE":        "webhook",
 		})
-		h.cfg.PublicBaseURL = base
 		h.cfg.WebhookSecret = secret
 		h.cfg.TGMode = "webhook"
-		_, _ = h.tg.SendMessage(dest, msg+"\n🔗 Telegram 已连通 Webhook\nAgent 请配置 `MASTER_BASE_URL="+base+"`（仅 https://域名）", true, threadID)
-		log.Printf("[master] webhook enabled: %s", hook)
+		_, _ = h.tg.SendMessage(dest, msg+
+			"\n🔗 Telegram Webhook: `"+hook+"`"+
+			"\nAgent 请配置 `MASTER_BASE_URL="+base+"`", true, threadID)
+		log.Printf("[master] webhook enabled: %s (local_tls=%v)", hook, enableTLS)
 	}
 }
 
