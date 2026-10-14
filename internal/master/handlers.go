@@ -515,6 +515,12 @@ func (h *Handlers) confirmRegister(owner, dest, id string, msgID, threadID int) 
 	}
 	_ = h.db.UpsertNode(p.owner, p.node, p.ip, p.region, p.alias, p.ota)
 	body := fmt.Sprintf("✅ *已注册* (v%s)\n节点 `%s` 已加入列表。", h.cfg.MasterVersion, p.alias)
+	if tid, err := h.ensureNodeForumTopic(p.owner, p.node, p.alias, p.region); err != nil {
+		log.Printf("[master] forum topic after register: %v", err)
+		body += "\n⚠️ 论坛话题创建失败，可稍后「重建论坛话题」。"
+	} else if tid > 0 {
+		body += fmt.Sprintf("\n📌 已创建论坛话题 (thread `%d`)", tid)
+	}
 	if msgID > 0 {
 		_, _ = h.tg.ReplaceUI(dest, msgID, body, [][]map[string]string{
 			{{"text": "节点列表", "callback_data": "list_nodes"}},
@@ -523,6 +529,47 @@ func (h *Handlers) confirmRegister(owner, dest, id string, msgID, threadID int) 
 		_, _ = h.tg.SendMessage(dest, body, true, threadID)
 	}
 	h.sendRegionMenu(owner, dest, 0, threadID)
+}
+
+// ensureNodeForumTopic creates a forum topic when ForumMode is on and none is bound yet.
+func (h *Handlers) ensureNodeForumTopic(owner, node, alias, region string) (int, error) {
+	if !h.cfg.ForumMode || h.cfg.ForumChatID == "" {
+		return 0, nil
+	}
+	owner = SanitizeChatID(owner)
+	node = SanitizeNodeName(node)
+	if owner == "" || node == "" {
+		return 0, fmt.Errorf("owner/node 无效")
+	}
+	rows, _ := h.db.Query(
+		`SELECT message_thread_id FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1`,
+		owner, node,
+	)
+	if len(rows) > 0 {
+		if tid := intFrom(rows[0]["message_thread_id"]); tid > 0 {
+			return tid, nil
+		}
+	}
+	if alias == "" {
+		alias = node
+	}
+	if region == "" {
+		region = "UNKNOWN"
+	}
+	title := alias + " · " + region
+	tid, err := h.tg.CreateForumTopic(h.cfg.ForumChatID, title)
+	if err != nil || tid == 0 {
+		if err == nil {
+			err = fmt.Errorf("createForumTopic 返回空 thread")
+		}
+		return 0, err
+	}
+	_ = h.db.Exec(`UPDATE nodes SET message_thread_id=? WHERE chat_id=? AND node_name=?`, tid, owner, node)
+	_ = h.hub.SendCommand(owner, node, "/trigger_set_topic", map[string]any{
+		"chat": fmt.Sprint(h.cfg.ForumChatID), "thread": fmt.Sprint(tid),
+	}, 0)
+	log.Printf("[master] forum topic created node=%s thread=%d", node, tid)
+	return tid, nil
 }
 
 func (h *Handlers) rejectRegister(owner, dest, id string, msgID, threadID int) {
@@ -745,7 +792,7 @@ func (h *Handlers) forumTopicsRebuild(owner, dest string, threadID int) {
 		h.startForumBind(owner, dest, threadID)
 		return
 	}
-	rows, _ := h.db.Query(`SELECT node_name, node_alias, region FROM nodes WHERE chat_id=?`, owner)
+	rows, _ := h.db.Query(`SELECT node_name, node_alias, region, message_thread_id FROM nodes WHERE chat_id=?`, owner)
 	ok, fail := 0, 0
 	for _, r := range rows {
 		node := AsString(r["node_name"])
@@ -754,17 +801,16 @@ func (h *Handlers) forumTopicsRebuild(owner, dest string, threadID int) {
 			alias = node
 		}
 		region := AsString(r["region"])
-		title := alias + " · " + region
-		tid, err := h.tg.CreateForumTopic(h.cfg.ForumChatID, title)
-		if err != nil || tid == 0 {
-			fail++
-			continue
+		if intFrom(r["message_thread_id"]) > 0 {
+			// 强制重建：清掉旧绑定再创建
+			_ = h.db.Exec(`UPDATE nodes SET message_thread_id=NULL WHERE chat_id=? AND node_name=?`, owner, node)
 		}
-		_ = h.db.Exec(`UPDATE nodes SET message_thread_id=? WHERE chat_id=? AND node_name=?`, tid, owner, node)
-		_ = h.hub.SendCommand(owner, node, "/trigger_set_topic", map[string]any{
-			"chat": fmt.Sprint(h.cfg.ForumChatID), "thread": fmt.Sprint(tid),
-		}, 0)
-		ok++
+		if _, err := h.ensureNodeForumTopic(owner, node, alias, region); err != nil {
+			fail++
+			log.Printf("[master] forum rebuild node=%s: %v", node, err)
+		} else {
+			ok++
+		}
 		time.Sleep(350 * time.Millisecond)
 	}
 	_, _ = h.tg.SendMessage(dest, fmt.Sprintf("📌 话题重建完成：成功 %d / 失败 %d", ok, fail), false, threadID)

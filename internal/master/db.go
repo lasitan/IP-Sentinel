@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -146,6 +147,39 @@ func (d *DB) Scalar(sqlStr string, args ...any) (any, error) {
 
 func (d *DB) TouchLastSeen(chatID, node string) error {
 	return d.Exec(`UPDATE nodes SET last_seen=CURRENT_TIMESTAMP WHERE chat_id=? AND node_name=?`, chatID, node)
+}
+
+// SeenRecently reports whether last_seen is within maxAge (SQLite CURRENT_TIMESTAMP = UTC).
+func (d *DB) SeenRecently(chatID, node string, maxAge time.Duration) bool {
+	if maxAge <= 0 {
+		maxAge = 120 * time.Second
+	}
+	rows, err := d.Query(
+		`SELECT last_seen FROM nodes WHERE chat_id=? AND node_name=? LIMIT 1`,
+		chatID, node,
+	)
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	raw := AsString(rows[0]["last_seen"])
+	if raw == "" {
+		return false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+	}
+	var t time.Time
+	var parseErr error
+	for _, layout := range layouts {
+		t, parseErr = time.ParseInLocation(layout, raw, time.UTC)
+		if parseErr == nil {
+			return time.Since(t) <= maxAge
+		}
+	}
+	return false
 }
 
 func (d *DB) UpsertNode(chatID, node, ip, region, alias, ota string) error {

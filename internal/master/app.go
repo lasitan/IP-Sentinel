@@ -36,6 +36,11 @@ func NewApp(cfg *Config) (*App, error) {
 	tg := NewTelegram(cfg.TGToken)
 	hub := NewHub(db)
 	h := NewHandlers(cfg, db, tg, hub)
+	hub.OnAuthed = func(owner, node, ip, region, alias string) {
+		if _, err := h.ensureNodeForumTopic(owner, node, alias, region); err != nil {
+			log.Printf("[master] ensure topic on auth node=%s: %v", node, err)
+		}
+	}
 	return &App{Cfg: cfg, DB: db, TG: tg, Hub: hub, Handlers: h, pollStop: make(chan struct{})}, nil
 }
 

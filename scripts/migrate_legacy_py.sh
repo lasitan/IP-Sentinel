@@ -151,7 +151,7 @@ EOF
   echo "Python 控制端已清理。请在 TG 发送 /nginx 配置 https 域名后，节点再填 MASTER_BASE_URL。"
 }
 
-# 节点：只保留 TG_TOKEN / CHAT_ID / REGION_CODE；MASTER_BASE_URL 必须重配为 https://域名
+# 节点：仅在仍有 Python 运行时（py/.venv）时迁移；保留已有合法 MASTER_BASE_URL
 migrate_legacy_agent() {
   local legacy="${1:-/opt/ip_sentinel}"
   local conf_dir="${2:-/etc/ip-sentinel}"
@@ -160,14 +160,12 @@ migrate_legacy_agent() {
   local new_conf="${conf_dir}/config.conf"
   local legacy_conf="${legacy}/config.conf"
 
-  local found=false
-  [ -f "$legacy_conf" ] && found=true
-  if [ -d "${legacy}/py" ] || [ -d "${legacy}/.venv" ]; then
-    found=true
+  # 仅残留旧 conf、无 py/.venv 时不再重写 Go 配置（避免每次安装清空 MASTER_BASE_URL）
+  if [ ! -d "${legacy}/py" ] && [ ! -d "${legacy}/.venv" ]; then
+    return 0
   fi
-  [ "$found" = false ] && return 0
 
-  echo "检测到旧版 Python 节点 (${legacy})，开始迁移（仅保留 TG_TOKEN/CHAT_ID/REGION_CODE）…"
+  echo "检测到旧版 Python 节点 (${legacy})，开始迁移（保留已有 https MASTER_BASE_URL）…"
 
   stop_unit_if_any "ip-sentinel-agent"
   pkill -f "agent_daemon.py" 2>/dev/null || true
@@ -177,7 +175,7 @@ migrate_legacy_agent() {
 
   mkdir -p "$conf_dir" "$data_dir" "$data_dir/core" "$data_dir/data" "$log_dir"
 
-  local token="" chat="" region=""
+  local token="" chat="" region="" base="" node_name="" node_alias=""
   token="$(migrate_conf_get "$legacy_conf" "TG_TOKEN")"
   chat="$(migrate_conf_get "$legacy_conf" "CHAT_ID")"
   region="$(migrate_conf_get "$legacy_conf" "REGION_CODE")"
@@ -185,9 +183,16 @@ migrate_legacy_agent() {
   [ -z "$chat" ] && chat="$(migrate_conf_get "$new_conf" "CHAT_ID")"
   [ -z "$region" ] && region="$(migrate_conf_get "$new_conf" "REGION_CODE")"
   region="${region:-UNKNOWN}"
+  base="$(migrate_conf_get "$new_conf" "MASTER_BASE_URL")"
+  case "$base" in
+    https://*) ;;
+    *) base="" ;;
+  esac
+  node_name="$(migrate_conf_get "$new_conf" "NODE_NAME")"
+  node_alias="$(migrate_conf_get "$new_conf" "NODE_ALIAS")"
 
   cat > "$new_conf" <<EOF
-# migrated from Python — only TG_TOKEN/CHAT_ID/REGION_CODE trusted
+# migrated from Python — TG_TOKEN/CHAT_ID/REGION_CODE; keep https MASTER_BASE_URL if present
 TG_TOKEN="${token}"
 CHAT_ID="${chat}"
 REGION_CODE="${region}"
@@ -197,10 +202,15 @@ ENABLE_GOOGLE="true"
 ENABLE_TRUST="true"
 ENABLE_MAPS_GEO="true"
 ENABLE_OTA="true"
-# MASTER_BASE_URL must be https://domain (no IP); set by install / admin
-MASTER_BASE_URL=""
+MASTER_BASE_URL="${base}"
 EOF
-  echo "已写入精简配置 → ${new_conf}（需重新配置 MASTER_BASE_URL=https://域名）"
+  [ -n "$node_name" ] && migrate_conf_key_set "$new_conf" "NODE_NAME" "$node_name"
+  [ -n "$node_alias" ] && migrate_conf_key_set "$new_conf" "NODE_ALIAS" "$node_alias"
+  if [ -n "$base" ]; then
+    echo "已写入精简配置 → ${new_conf}（已保留 MASTER_BASE_URL=${base}）"
+  else
+    echo "已写入精简配置 → ${new_conf}（需配置 MASTER_BASE_URL=https://域名）"
+  fi
 
   if [ -d "${legacy}/data" ]; then
     mkdir -p "${data_dir}/data"

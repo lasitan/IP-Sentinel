@@ -47,6 +47,8 @@ type Hub struct {
 	mu      sync.Mutex
 	conns   map[connKey]*agentConn
 	pending map[string]*pendingResult
+	// OnAuthed is invoked after successful auth (e.g. ensure forum topic).
+	OnAuthed func(owner, node, ip, region, alias string)
 }
 
 func NewHub(db *DB) *Hub {
@@ -113,6 +115,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.UpsertNode(chatID, node, ip, region, alias, ota)
 	_ = h.write(ws, protocol.Envelope{"op": protocol.OpAuthOK, "node": node})
 	log.Printf("[master-ws] Agent connected: %s (%s)", node, chatID)
+	if h.OnAuthed != nil {
+		go h.OnAuthed(chatID, node, ip, region, alias)
+	}
 
 	_ = ws.SetReadDeadline(time.Now().Add(protocol.WSPingInterval + protocol.WSPingTimeout))
 	go h.pingLoop(ac)
@@ -210,11 +215,21 @@ func (h *Hub) write(ws *websocket.Conn, msg protocol.Envelope) error {
 	return ws.WriteMessage(websocket.BinaryMessage, raw)
 }
 
+// onlineGrace is how long last_seen counts as online during brief WS reconnect gaps.
+const onlineGrace = 120 * time.Second
+
 func (h *Hub) IsOnline(owner, node string) bool {
-	key := connKey{owner: SanitizeChatID(owner), node: SanitizeNodeName(node)}
+	owner = SanitizeChatID(owner)
+	node = SanitizeNodeName(node)
+	key := connKey{owner: owner, node: node}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.conns[key] != nil
+	live := h.conns[key] != nil
+	h.mu.Unlock()
+	if live {
+		return true
+	}
+	// Brief disconnect / reconnect window: treat recent last_seen as online for UI.
+	return h.db != nil && h.db.SeenRecently(owner, node, onlineGrace)
 }
 
 func (h *Hub) SendCommand(owner, node, path string, params map[string]any, timeout time.Duration) string {

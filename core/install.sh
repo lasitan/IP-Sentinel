@@ -113,13 +113,24 @@ esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# --- Python → Go 无感迁移（保留配置，删除旧依赖）---
+# migrate 前缓存 BASE，防止旧迁移脚本清空后丢失
+STASH_BASE="${MASTER_BASE_URL:-}"
+[ -z "$STASH_BASE" ] && STASH_BASE="$(conf_get "$CONF" MASTER_BASE_URL)"
+
+# --- Python → Go 无感迁移（仅 py/.venv 存在时；保留已有 https BASE）---
 if curl -fsSL "${REPO_RAW}/scripts/migrate_legacy_py.sh" -o "${TMP}/migrate_legacy_py.sh"; then
   # shellcheck disable=SC1091
   . "${TMP}/migrate_legacy_py.sh"
   migrate_legacy_agent "$LEGACY_DIR" "$CONF_DIR" "$DATA_DIR" "$LOG_DIR"
 else
   echo "警告: 无法拉取迁移脚本，跳过旧版 Python 清理（若为全新安装可忽略）"
+fi
+
+# migrate 后若 BASE 被清空则回填
+AFTER_BASE="$(conf_get "$CONF" MASTER_BASE_URL)"
+if [ -z "$AFTER_BASE" ] && [ -n "$STASH_BASE" ]; then
+  conf_set "$CONF" "MASTER_BASE_URL" "$STASH_BASE"
+  echo "已回填 MASTER_BASE_URL=${STASH_BASE}"
 fi
 
 VERSION_BODY="$(curl -fsSL "$VERSION_URL")" || {
