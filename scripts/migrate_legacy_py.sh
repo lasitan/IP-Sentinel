@@ -32,6 +32,23 @@ stop_unit_if_any() {
   fi
 }
 
+purge_playwright_browsers() {
+  # 清理 Python 版 Playwright 无头浏览器缓存（系统 Chromium 将另行安装）
+  rm -rf \
+    /root/.cache/ms-playwright \
+    /root/.cache/ms-playwright-* \
+    /var/lib/ip_sentinel/.cache/ms-playwright \
+    /opt/ip_sentinel/ms-playwright \
+    /opt/ip_sentinel/.cache/ms-playwright \
+    /opt/ip_sentinel_master/ms-playwright \
+    /opt/ip_sentinel_master/.cache/ms-playwright \
+    2>/dev/null || true
+  if [ -d /home ]; then
+    find /home -maxdepth 4 \( -type d -name 'ms-playwright' -o -type d -name 'ms-playwright-*' \) \
+      -exec rm -rf {} + 2>/dev/null || true
+  fi
+}
+
 purge_python_runtime_dir() {
   local root="$1"
   [ -d "$root" ] || return 0
@@ -46,6 +63,7 @@ purge_python_runtime_dir() {
   rm -rf "${root}/ms-playwright" "${root}/.cache/ms-playwright" 2>/dev/null || true
   # 丢弃旧自签证书
   rm -f "${root}/core/ws_cert.pem" "${root}/core/ws_key.pem" 2>/dev/null || true
+  purge_playwright_browsers
 }
 
 purge_legacy_cron() {

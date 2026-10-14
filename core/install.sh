@@ -208,10 +208,61 @@ ENABLE_OTA="true"
 LOG_FILE="${LOG_DIR}/sentinel.log"
 EOF
 echo "已写入 ${CONF}（仅信任 Token/ChatID/地区；MASTER_BASE_URL=${MASTER_BASE_URL}）"
-echo "注册消息示例（发给 Bot）: #REGISTER#|NODE|IP|${REGION_CODE}|ALIAS|true"
 
-if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
-  echo "提示: 未检测到 Chromium；Google 地理定位维护将回退 HTTP"
+# 清理旧 Python Playwright 浏览器，并确保系统 Chromium 可用
+if declare -F purge_playwright_browsers >/dev/null 2>&1; then
+  purge_playwright_browsers
+else
+  rm -rf /root/.cache/ms-playwright /opt/ip_sentinel/ms-playwright /opt/ip_sentinel/.cache/ms-playwright 2>/dev/null || true
+fi
+
+ensure_chromium() {
+  if command -v google-chrome >/dev/null 2>&1 || command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+    echo "已检测到 Chromium/Chrome"
+    return 0
+  fi
+  echo "未检测到 Chromium，正在安装…"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y || true
+  if apt-get install -y chromium 2>/dev/null; then
+    echo "已安装 chromium"
+  elif apt-get install -y chromium-browser 2>/dev/null; then
+    echo "已安装 chromium-browser"
+  else
+    echo "警告: 无法通过 apt 安装 Chromium；Google 地理定位将回退 HTTP"
+    return 1
+  fi
+}
+ensure_chromium || true
+
+# 解析公网 IP / 节点名，向 Bot 发送注册请求（由控制端弹出确认按钮，不在终端确认）
+detect_public_ip() {
+  local ip=""
+  ip="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+  [ -n "$ip" ] || ip="$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || true)"
+  [ -n "$ip" ] || ip="$(curl -fsS --max-time 8 https://icanhazip.com 2>/dev/null || true)"
+  printf '%s' "$(echo "$ip" | tr -d '[:space:]')"
+}
+
+if [ "${SILENT_AGENT_OTA:-}" != "true" ]; then
+  PUBLIC_IP="$(detect_public_ip)"
+  HOST_RAW="$(hostname 2>/dev/null || echo node)"
+  HOST_SAFE="$(printf '%s' "$HOST_RAW" | tr -cd 'A-Za-z0-9' | cut -c1-10)"
+  [ -n "$HOST_SAFE" ] || HOST_SAFE="node"
+  IP_HASH="$(printf '%s' "${PUBLIC_IP:-127.0.0.1}" | md5sum 2>/dev/null | awk '{print substr($1,1,4)}')"
+  [ -n "$IP_HASH" ] || IP_HASH="0000"
+  NODE_NAME="${HOST_SAFE}-${IP_HASH}"
+  NODE_ALIAS="${HOST_RAW}"
+  NODE_ALIAS="$(printf '%s' "$NODE_ALIAS" | cut -c1-30)"
+  REG_MSG="#REGISTER#|${NODE_NAME}|${PUBLIC_IP}|${REGION_CODE}|${NODE_ALIAS}|true"
+  if curl -fsS --max-time 20 -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+    --data-urlencode "chat_id=${CHAT_ID}" \
+    --data-urlencode "text=${REG_MSG}" >/dev/null; then
+    echo "已向 Telegram 发送注册请求，请在 Bot 对话中点击「确认注册」。"
+  else
+    echo "警告: 自动发送注册请求失败。请私聊 Bot 发送："
+    echo "  ${REG_MSG}"
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then

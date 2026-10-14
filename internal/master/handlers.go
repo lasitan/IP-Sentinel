@@ -14,6 +14,15 @@ import (
 	"github.com/lasitan/IP-Sentinel/internal/protocol"
 )
 
+type pendingReg struct {
+	owner  string
+	node   string
+	ip     string
+	region string
+	alias  string
+	ota    string
+}
+
 type Handlers struct {
 	cfg    *Config
 	db     *DB
@@ -23,6 +32,7 @@ type Handlers struct {
 	rename map[int]string    // msgID -> node
 	nginx  map[string]string // chatID -> awaiting domain|email
 	forum  map[string]string // chatID -> awaiting forum_bind
+	reg    map[string]pendingReg
 }
 
 func NewHandlers(cfg *Config, db *DB, tg *Telegram, hub *Hub) *Handlers {
@@ -34,6 +44,7 @@ func NewHandlers(cfg *Config, db *DB, tg *Telegram, hub *Hub) *Handlers {
 		rename: map[int]string{},
 		nginx:  map[string]string{},
 		forum:  map[string]string{},
+		reg:    map[string]pendingReg{},
 	}
 }
 
@@ -111,7 +122,10 @@ func (h *Handlers) Dispatch(chatID, text, cbID string, msgID, threadID, userMsgI
 	}
 
 	if strings.HasPrefix(text, "#REGISTER#") {
-		h.handleRegister(owner, text, dest, uiThread)
+		if userMsgID > 0 {
+			h.tg.DeleteMessage(chatID, userMsgID, threadID)
+		}
+		h.handleRegisterPrompt(owner, text, dest, uiThread)
 		return
 	}
 	// Intentionally ignore #WSS_LOOKUP# and do not preview/resend WSS URLs.
@@ -160,6 +174,10 @@ func (h *Handlers) Dispatch(chatID, text, cbID string, msgID, threadID, userMsgI
 		h.promptRename(owner, dest, strings.TrimPrefix(text, "rename:"), uiThread)
 	case strings.HasPrefix(text, "del:"):
 		h.deleteNode(owner, dest, strings.TrimPrefix(text, "del:"), msgID, uiThread)
+	case strings.HasPrefix(text, "reg_ok:"):
+		h.confirmRegister(owner, dest, strings.TrimPrefix(text, "reg_ok:"), msgID, uiThread)
+	case strings.HasPrefix(text, "reg_no:"):
+		h.rejectRegister(owner, dest, strings.TrimPrefix(text, "reg_no:"), msgID, uiThread)
 	case strings.HasPrefix(text, "ota_confirm:"):
 		h.otaConfirm(owner, dest, strings.TrimPrefix(text, "ota_confirm:"), msgID, uiThread)
 	case strings.HasPrefix(text, "ota_execute:") || strings.HasPrefix(text, "ota_one:"):
@@ -382,18 +400,17 @@ func formatAgentResp(resp, action string) string {
 	return fmt.Sprintf("`%s` 已受理\n%s", actionLabel(action), resp)
 }
 
-func (h *Handlers) handleRegister(owner, text, dest string, threadID int) {
+func parseRegisterPayload(text string) (node, ip, region, alias, ota string, err error) {
 	// #REGISTER#|node|ip|region|alias|ota
 	parts := strings.Split(text, "|")
 	if len(parts) < 3 {
-		_, _ = h.tg.SendMessage(dest, "注册格式无效", false, threadID)
-		return
+		return "", "", "", "", "", fmt.Errorf("注册格式无效")
 	}
-	node := SanitizeNodeName(parts[1])
-	ip := SanitizeAgentIP(parts[2])
-	region := "UNKNOWN"
-	alias := node
-	ota := "false"
+	node = SanitizeNodeName(parts[1])
+	ip = SanitizeAgentIP(parts[2])
+	region = "UNKNOWN"
+	alias = node
+	ota = "false"
 	if len(parts) > 3 {
 		region = SanitizeRegion(parts[3])
 	}
@@ -402,19 +419,83 @@ func (h *Handlers) handleRegister(owner, text, dest string, threadID int) {
 	}
 	if len(parts) > 5 {
 		ota = strings.ToLower(parts[5])
+		if ota != "true" && ota != "false" {
+			ota = "false"
+		}
 	}
 	if node == "" {
-		_, _ = h.tg.SendMessage(dest, "节点名无效", false, threadID)
-		return
+		return "", "", "", "", "", fmt.Errorf("节点名无效")
 	}
 	if ip != "" && IsSSRFIP(ip) {
-		_, _ = h.tg.SendMessage(dest, "拒绝注册：IP 不可用（私网/环回）", false, threadID)
+		return "", "", "", "", "", fmt.Errorf("拒绝注册：IP 不可用（私网/环回）")
+	}
+	return node, ip, region, alias, ota, nil
+}
+
+// handleRegisterPrompt 收到注册请求后发确认按钮，不立刻入库。
+func (h *Handlers) handleRegisterPrompt(owner, text, dest string, threadID int) {
+	node, ip, region, alias, ota, err := parseRegisterPayload(text)
+	if err != nil {
+		_, _ = h.tg.SendMessage(dest, "❌ "+err.Error(), false, threadID)
 		return
 	}
-	_ = h.db.UpsertNode(owner, node, ip, region, alias, ota)
-	// No WSS URL preview / private resend — agents use MASTER_BASE_URL from install.
-	_, _ = h.tg.SendMessage(dest, fmt.Sprintf("✅ *已注册* (v%s)\n节点 `%s` 已加入列表。", h.cfg.MasterVersion, alias), true, threadID)
+	id := randomHex(8)
+	h.mu.Lock()
+	h.reg[id] = pendingReg{owner: owner, node: node, ip: ip, region: region, alias: alias, ota: ota}
+	h.mu.Unlock()
+	body := fmt.Sprintf(
+		"🆕 *节点注册请求*\n节点: `%s`\n别名: `%s`\nIP: `%s`\n地区: `%s`\nOTA: `%s`\n\n请确认是否注册到控制端：",
+		node, alias, ip, region, ota,
+	)
+	kb := [][]map[string]string{
+		{
+			{"text": "✅ 确认注册", "callback_data": "reg_ok:" + id},
+			{"text": "❌ 拒绝", "callback_data": "reg_no:" + id},
+		},
+	}
+	_, _ = h.tg.SendUI(dest, body, kb, threadID)
+}
+
+func (h *Handlers) confirmRegister(owner, dest, id string, msgID, threadID int) {
+	h.mu.Lock()
+	p, ok := h.reg[id]
+	if ok {
+		delete(h.reg, id)
+	}
+	h.mu.Unlock()
+	if !ok || p.owner != owner {
+		_, _ = h.tg.SendMessage(dest, "注册请求已失效或不属于你，请让节点重新发送注册。", false, threadID)
+		return
+	}
+	_ = h.db.UpsertNode(p.owner, p.node, p.ip, p.region, p.alias, p.ota)
+	body := fmt.Sprintf("✅ *已注册* (v%s)\n节点 `%s` 已加入列表。", h.cfg.MasterVersion, p.alias)
+	if msgID > 0 {
+		_, _ = h.tg.ReplaceUI(dest, msgID, body, [][]map[string]string{
+			{{"text": "节点列表", "callback_data": "list_nodes"}},
+		}, threadID)
+	} else {
+		_, _ = h.tg.SendMessage(dest, body, true, threadID)
+	}
 	h.sendRegionMenu(owner, dest, 0, threadID)
+}
+
+func (h *Handlers) rejectRegister(owner, dest, id string, msgID, threadID int) {
+	h.mu.Lock()
+	p, ok := h.reg[id]
+	if ok {
+		delete(h.reg, id)
+	}
+	h.mu.Unlock()
+	if !ok || p.owner != owner {
+		_, _ = h.tg.SendMessage(dest, "注册请求已失效。", false, threadID)
+		return
+	}
+	body := fmt.Sprintf("已拒绝注册节点 `%s`。", p.alias)
+	if msgID > 0 {
+		_, _ = h.tg.ReplaceUI(dest, msgID, body, [][]map[string]string{}, threadID)
+	} else {
+		_, _ = h.tg.SendMessage(dest, body, true, threadID)
+	}
 }
 
 func (h *Handlers) handleSVQ(owner, text, dest string, threadID int) {

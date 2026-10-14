@@ -3,12 +3,27 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
+
+func systemChromiumPath() string {
+	for _, p := range []string{
+		"/usr/bin/chromium",
+		"/usr/bin/chromium-browser",
+		"/usr/bin/google-chrome",
+		"/usr/bin/google-chrome-stable",
+	} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
 
 // VisitMapsWithGeo opens Google Maps with geolocation override (chromedp).
 func VisitMapsWithGeo(cfg *Config, lat, lng float64, mapsURL string) error {
@@ -21,8 +36,12 @@ func VisitMapsWithGeo(cfg *Config, lat, lng float64, mapsURL string) error {
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("no-sandbox", true),
 		chromedp.WindowSize(1920, 1080),
 	)
+	if p := systemChromiumPath(); p != "" {
+		opts = append(opts, chromedp.ExecPath(p))
+	}
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 	ctx, cancel2 := chromedp.NewContext(allocCtx)
