@@ -252,6 +252,38 @@ func (t *Telegram) CreateForumTopic(chatID, name string) (int, error) {
 	return int(id), nil
 }
 
+// EditForumTopic renames a topic. exists=false means the topic is gone (deleted or invalid id).
+func (t *Telegram) EditForumTopic(chatID string, threadID int, name string) (exists bool, err error) {
+	_, err = t.Call("editForumTopic", map[string]any{
+		"chat_id": chatID, "message_thread_id": threadID, "name": truncate(name, 128),
+	})
+	if err == nil {
+		return true, nil
+	}
+	low := strings.ToLower(err.Error())
+	if strings.Contains(low, "topic_not_modified") {
+		return true, nil
+	}
+	if strings.Contains(low, "topic_id_invalid") || strings.Contains(low, "thread not found") ||
+		strings.Contains(low, "topic_deleted") || strings.Contains(low, "message thread not found") {
+		return false, nil
+	}
+	return false, err
+}
+
+// DeleteForumTopic deletes a topic with all its messages; an already-missing topic counts as success.
+func (t *Telegram) DeleteForumTopic(chatID string, threadID int) error {
+	_, err := t.Call("deleteForumTopic", map[string]any{"chat_id": chatID, "message_thread_id": threadID})
+	if err != nil {
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "topic_id_invalid") || strings.Contains(low, "thread not found") ||
+			strings.Contains(low, "topic_deleted") {
+			return nil
+		}
+	}
+	return err
+}
+
 func (t *Telegram) SyncBotCommands() {
 	cmds := []map[string]string{
 		{"command": "start", "description": "打开主菜单"},

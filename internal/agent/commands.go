@@ -14,7 +14,7 @@ import (
 func ExecuteCommand(cfg *Config, path string, params map[string]any) (int, string) {
 	switch path {
 	case "/trigger_run":
-		go func() { _ = RunMaintenance(cfg) }()
+		go func() { _ = RunMaintenance(cfg, true) }()
 		cfg.Log("WS", "INFO", "收到指令: 立即执行维护")
 		return 200, "Action Accepted"
 	case "/trigger_google":
@@ -42,9 +42,16 @@ func ExecuteCommand(cfg *Config, path string, params map[string]any) (int, strin
 		}
 		return 200, body
 	case "/trigger_quality":
-		go func() { _ = RunQuality(cfg) }()
-		cfg.Log("WS", "INFO", "收到指令: IP 质量检测")
+		go RunQuality(cfg)
+		cfg.Log("WS", "INFO", "收到指令: IP 解锁检测")
 		return 200, "Action Accepted"
+	case "/trigger_quality_sync":
+		cfg.Log("WS", "INFO", "收到指令: IP 解锁检测（同步）")
+		b, err := json.Marshal(RunQuality(cfg))
+		if err != nil {
+			return 500, err.Error()
+		}
+		return 200, string(b)
 	case "/trigger_log":
 		go pushLog(cfg)
 		return 200, "Action Accepted"

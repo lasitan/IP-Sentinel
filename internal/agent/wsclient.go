@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,15 +20,14 @@ type trendItem struct {
 
 // WSClient connects to Master /ws using MASTER_BASE_URL (binary MessagePack).
 type WSClient struct {
-	cfg     *Config
-	stop    chan struct{}
-	mu      sync.Mutex
-	trends  []trendItem
-	lastPong time.Time
+	cfg    *Config
+	stop   chan struct{}
+	mu     sync.Mutex
+	trends []trendItem
 }
 
 func NewWSClient(cfg *Config) *WSClient {
-	return &WSClient{cfg: cfg, stop: make(chan struct{}), lastPong: time.Now()}
+	return &WSClient{cfg: cfg, stop: make(chan struct{})}
 }
 
 func (c *WSClient) Stop() {
@@ -69,10 +69,12 @@ func (c *WSClient) Run() {
 			time.Sleep(30 * time.Second)
 			continue
 		}
+		started := time.Now()
 		err = c.session(url)
 		if err != nil {
 			cfg.Log("WS", "WARN", fmt.Sprintf("会话结束: %v", err))
-		} else {
+		}
+		if err == nil || time.Since(started) > time.Minute {
 			backoff = time.Second
 		}
 		jitter := time.Duration(rand.Int63n(int64(backoff/2) + 1))
@@ -115,6 +117,7 @@ func (c *WSClient) session(url string) error {
 	}
 	defer ws.Close()
 	ws.SetReadLimit(protocol.MaxMessageSize)
+	w := &sessionWriter{ws: ws}
 
 	node := cfg.NodeName
 	chatID := cfg.ChatID
@@ -123,9 +126,9 @@ func (c *WSClient) session(url string) error {
 	auth := protocol.Envelope{
 		"op": protocol.OpAuth, "chat_id": chatID, "node": node, "ts": ts, "sign": sign,
 		"region": cfg.RegionCode, "ip": cfg.PublicIP, "alias": firstNonEmpty(cfg.NodeAlias, node),
-		"ota": boolStr(cfg.EnableOTA),
+		"ota": boolStr(cfg.EnableOTA), "google": boolStr(cfg.EnableGoogle), "trust": boolStr(cfg.EnableTrust),
 	}
-	if err := writeBin(ws, auth); err != nil {
+	if err := w.write(auth); err != nil {
 		return err
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(protocol.AuthTimeout))
@@ -138,94 +141,123 @@ func (c *WSClient) session(url string) error {
 		return fmt.Errorf("auth failed: %v", msg.String("error"))
 	}
 	cfg.Log("WS", "INFO", "已连接 Master "+url)
-	c.lastPong = time.Now()
 
-	ws.SetPongHandler(func(string) error {
-		c.lastPong = time.Now()
-		_ = ws.SetReadDeadline(time.Now().Add(protocol.WSPingInterval + protocol.WSPingTimeout))
-		return nil
+	var lastPong atomic.Int64
+	touch := func() {
+		lastPong.Store(time.Now().UnixNano())
+		_ = ws.SetReadDeadline(time.Now().Add(protocol.WSDeadAfter))
+	}
+	touch()
+	// Pong/Ping handlers run inside ReadMessage (reader goroutine).
+	ws.SetPongHandler(func(string) error { touch(); return nil })
+	ws.SetPingHandler(func(appData string) error {
+		touch()
+		return w.control(websocket.PongMessage, []byte(appData))
 	})
 
-	errCh := make(chan error, 1)
+	// gorilla: a read error (incl. timeout) is permanent, so one reader with a long deadline.
+	msgCh := make(chan protocol.Envelope, 16)
+	readErr := make(chan error, 1)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		ticker := time.NewTicker(protocol.AppPingEvery)
-		defer ticker.Stop()
 		for {
-			select {
-			case <-c.stop:
-				errCh <- nil
+			mt, data, err := ws.ReadMessage()
+			if err != nil {
+				readErr <- err
 				return
-			case <-ticker.C:
-				if time.Since(c.lastPong) > protocol.AppPongWait {
-					errCh <- fmt.Errorf("app pong timeout")
-					return
-				}
-				if err := writeBin(ws, protocol.Envelope{"op": protocol.OpPing}); err != nil {
-					errCh <- err
-					return
-				}
-				_ = ws.WriteControl(websocket.PingMessage, []byte("p"), time.Now().Add(5*time.Second))
+			}
+			touch()
+			if mt != websocket.BinaryMessage && mt != websocket.TextMessage {
+				continue
+			}
+			m, err := protocol.Decode(data)
+			if err != nil {
+				continue
+			}
+			select {
+			case msgCh <- m:
+			case <-done:
+				return
 			}
 		}
 	}()
 
+	pingT := time.NewTicker(protocol.AppPingEvery)
+	defer pingT.Stop()
+	trendT := time.NewTicker(time.Second)
+	defer trendT.Stop()
+
 	for {
 		select {
-		case err := <-errCh:
+		case <-c.stop:
+			_ = w.control(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			return nil
+		case err := <-readErr:
 			return err
-		default:
-		}
-		c.flushTrend(ws)
-		_ = ws.SetReadDeadline(time.Now().Add(time.Second))
-		mt, data, err := ws.ReadMessage()
-		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		case <-pingT.C:
+			if time.Since(time.Unix(0, lastPong.Load())) > protocol.AppPongWait {
+				return fmt.Errorf("pong timeout")
+			}
+			if err := w.write(protocol.Envelope{"op": protocol.OpPing}); err != nil {
+				return err
+			}
+			if err := w.control(websocket.PingMessage, []byte("p")); err != nil {
+				return err
+			}
+		case <-trendT.C:
+			c.flushTrend(w)
+		case m := <-msgCh:
+			if m.Op() != protocol.OpCmd {
 				continue
 			}
-			return err
-		}
-		if mt != websocket.BinaryMessage && mt != websocket.TextMessage {
-			continue
-		}
-		msg, err := protocol.Decode(data)
-		if err != nil {
-			continue
-		}
-		switch msg.Op() {
-		case protocol.OpPong:
-			c.lastPong = time.Now()
-		case protocol.OpCmd:
-			reqID := msg.String("id")
-			path := msg.String("path")
-			params := msg.Map("params")
-			status, body := ExecuteCommand(cfg, path, params)
-			_ = writeBin(ws, protocol.Envelope{
-				"op": protocol.OpCmdResult, "id": reqID, "status": status, "body": body,
-			})
+			reqID := m.String("id")
+			path := m.String("path")
+			params := m.Map("params")
+			go func() {
+				status, body := ExecuteCommand(cfg, path, params)
+				_ = w.write(protocol.Envelope{
+					"op": protocol.OpCmdResult, "id": reqID, "status": status, "body": body,
+				})
+			}()
 		}
 	}
 }
 
-func (c *WSClient) flushTrend(ws *websocket.Conn) {
+// sessionWriter serializes writes; gorilla/websocket allows only one concurrent writer.
+type sessionWriter struct {
+	mu sync.Mutex
+	ws *websocket.Conn
+}
+
+func (w *sessionWriter) write(msg protocol.Envelope) error {
+	raw, err := protocol.Encode(msg)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return w.ws.WriteMessage(websocket.BinaryMessage, raw)
+}
+
+func (w *sessionWriter) control(mt int, data []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ws.WriteControl(mt, data, time.Now().Add(5*time.Second))
+}
+
+func (c *WSClient) flushTrend(w *sessionWriter) {
 	c.mu.Lock()
 	batch := c.trends
 	c.trends = nil
 	c.mu.Unlock()
 	for _, t := range batch {
-		_ = writeBin(ws, protocol.Envelope{
+		_ = w.write(protocol.Envelope{
 			"op": protocol.OpTrendSave, "node": t.node, "score": t.score,
 			"goog": t.goog, "play": t.play, "gemini": t.gemini,
 		})
 	}
-}
-
-func writeBin(ws *websocket.Conn, msg protocol.Envelope) error {
-	raw, err := protocol.Encode(msg)
-	if err != nil {
-		return err
-	}
-	_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return ws.WriteMessage(websocket.BinaryMessage, raw)
 }
 
 func firstNonEmpty(a, b string) string {

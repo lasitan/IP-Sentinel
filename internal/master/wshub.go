@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,11 +36,32 @@ type connKey struct {
 }
 
 type agentConn struct {
-	ws   *websocket.Conn
-	mu   sync.Mutex
-	key  connKey
-	done chan struct{}
+	ws       *websocket.Conn
+	mu       sync.Mutex // gorilla/websocket allows only one concurrent writer
+	key      connKey
+	done     chan struct{}
+	lastSeen atomic.Int64
 }
+
+func (ac *agentConn) send(msg protocol.Envelope) error {
+	raw, err := protocol.Encode(msg)
+	if err != nil {
+		return err
+	}
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	_ = ac.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return ac.ws.WriteMessage(websocket.BinaryMessage, raw)
+}
+
+func (ac *agentConn) control(mt int, data []byte) error {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.ws.WriteControl(mt, data, time.Now().Add(5*time.Second))
+}
+
+// lastSeenEvery throttles DB last_seen writes per connection.
+const lastSeenEvery = 30 * time.Second
 
 // Hub manages Agent WebSocket connections on /ws (binary MessagePack).
 type Hub struct {
@@ -64,12 +86,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	EnableTCPKeepAlive(ws.UnderlyingConn())
 	_ = ws.SetReadDeadline(time.Now().Add(protocol.AuthTimeout))
 	ws.SetReadLimit(protocol.MaxMessageSize)
-	ws.SetPongHandler(func(string) error {
-		_ = ws.SetReadDeadline(time.Now().Add(protocol.WSPingInterval + protocol.WSPingTimeout))
-		return nil
-	})
 
 	_, data, err := ws.ReadMessage()
 	if err != nil {
@@ -113,13 +132,29 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ota = "false"
 	}
 	_ = h.db.UpsertNode(chatID, node, ip, region, alias, ota)
-	_ = h.write(ws, protocol.Envelope{"op": protocol.OpAuthOK, "node": node})
+	if g, t := msg.String("google"), msg.String("trust"); g == "true" || g == "false" {
+		if t != "true" && t != "false" {
+			t = "true"
+		}
+		_ = h.db.Exec(`UPDATE nodes SET enable_google=?, enable_trust=? WHERE chat_id=? AND node_name=?`, g, t, chatID, node)
+	}
+	ac.lastSeen.Store(time.Now().UnixNano())
+	_ = ac.send(protocol.Envelope{"op": protocol.OpAuthOK, "node": node})
 	log.Printf("[master-ws] Agent connected: %s (%s)", node, chatID)
 	if h.OnAuthed != nil {
 		go h.OnAuthed(chatID, node, ip, region, alias)
 	}
 
-	_ = ws.SetReadDeadline(time.Now().Add(protocol.WSPingInterval + protocol.WSPingTimeout))
+	alive := func() {
+		_ = ws.SetReadDeadline(time.Now().Add(protocol.WSDeadAfter))
+		h.touch(ac)
+	}
+	alive()
+	ws.SetPongHandler(func(string) error { alive(); return nil })
+	ws.SetPingHandler(func(appData string) error {
+		alive()
+		return ac.control(websocket.PongMessage, []byte(appData))
+	})
 	go h.pingLoop(ac)
 
 	defer func() {
@@ -130,19 +165,30 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.mu.Unlock()
 		_ = ws.Close()
+		log.Printf("[master-ws] Agent disconnected: %s (%s)", node, chatID)
 	}()
 
 	for {
-		_ = ws.SetReadDeadline(time.Now().Add(protocol.WSPingInterval + protocol.WSPingTimeout))
 		mt, data, err := ws.ReadMessage()
 		if err != nil {
 			return
 		}
+		alive()
 		if mt != websocket.BinaryMessage && mt != websocket.TextMessage {
 			continue
 		}
 		h.onMessage(ac, data)
 	}
+}
+
+// touch refreshes DB last_seen at most once per lastSeenEvery.
+func (h *Hub) touch(ac *agentConn) {
+	now := time.Now().UnixNano()
+	prev := ac.lastSeen.Load()
+	if now-prev < int64(lastSeenEvery) || !ac.lastSeen.CompareAndSwap(prev, now) {
+		return
+	}
+	_ = h.db.TouchLastSeen(ac.key.owner, ac.key.node)
 }
 
 func (h *Hub) pingLoop(ac *agentConn) {
@@ -153,10 +199,7 @@ func (h *Hub) pingLoop(ac *agentConn) {
 		case <-ac.done:
 			return
 		case <-ticker.C:
-			ac.mu.Lock()
-			err := ac.ws.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(5*time.Second))
-			ac.mu.Unlock()
-			if err != nil {
+			if err := ac.control(websocket.PingMessage, []byte("ping")); err != nil {
 				_ = ac.ws.Close()
 				return
 			}
@@ -171,8 +214,7 @@ func (h *Hub) onMessage(ac *agentConn, raw []byte) {
 	}
 	switch msg.Op() {
 	case protocol.OpPing:
-		_ = h.db.TouchLastSeen(ac.key.owner, ac.key.node)
-		_ = h.write(ac.ws, protocol.Envelope{"op": protocol.OpPong})
+		_ = ac.send(protocol.Envelope{"op": protocol.OpPong})
 	case protocol.OpCmdResult:
 		id := msg.String("id")
 		h.mu.Lock()
@@ -218,14 +260,18 @@ func (h *Hub) write(ws *websocket.Conn, msg protocol.Envelope) error {
 // onlineGrace is how long last_seen counts as online during brief WS reconnect gaps.
 const onlineGrace = 120 * time.Second
 
+// IsConnected reports whether a live WS connection exists right now.
+func (h *Hub) IsConnected(owner, node string) bool {
+	key := connKey{owner: SanitizeChatID(owner), node: SanitizeNodeName(node)}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.conns[key] != nil
+}
+
 func (h *Hub) IsOnline(owner, node string) bool {
 	owner = SanitizeChatID(owner)
 	node = SanitizeNodeName(node)
-	key := connKey{owner: owner, node: node}
-	h.mu.Lock()
-	live := h.conns[key] != nil
-	h.mu.Unlock()
-	if live {
+	if h.IsConnected(owner, node) {
 		return true
 	}
 	// Brief disconnect / reconnect window: treat recent last_seen as online for UI.
@@ -257,11 +303,9 @@ func (h *Hub) SendCommand(owner, node, path string, params map[string]any, timeo
 	if params == nil {
 		params = map[string]any{}
 	}
-	ac.mu.Lock()
-	err := h.write(ac.ws, protocol.Envelope{
+	err := ac.send(protocol.Envelope{
 		"op": protocol.OpCmd, "id": reqID, "path": path, "params": params,
 	})
-	ac.mu.Unlock()
 	if err != nil {
 		return "FAILED"
 	}

@@ -196,6 +196,8 @@ func (h *Handlers) Dispatch(chatID, text, cbID string, msgID, threadID, userMsgI
 		h.broadcast(owner, dest, "/trigger_run", uiThread)
 	case text == "all_reports":
 		h.broadcast(owner, dest, "/trigger_report", uiThread)
+	case text == "all_quality":
+		h.startUnlockSweep(owner, dest, uiThread)
 	case text == "fleet_summary":
 		h.fleetSummary(owner, dest, uiThread)
 	case text == "nginx_menu":
@@ -255,6 +257,7 @@ func (h *Handlers) sendMainMenu(dest string, msgID, threadID int) {
 	kb := [][]map[string]string{
 		{{"text": "节点列表", "callback_data": "list_nodes"}},
 		{{"text": "全部节点维护", "callback_data": "all_run"}, {"text": "全部节点报告", "callback_data": "all_reports"}},
+		{{"text": "全部节点解锁检测", "callback_data": "all_quality"}},
 		{{"text": "节点状态摘要", "callback_data": "fleet_summary"}, {"text": "批量升级节点", "callback_data": "all_ota_confirm"}},
 		{{"text": "部署 Nginx 反代", "callback_data": "nginx_menu"}},
 	}
@@ -565,6 +568,8 @@ func (h *Handlers) ensureNodeForumTopic(owner, node, alias, region string) (int,
 		return 0, err
 	}
 	_ = h.db.Exec(`UPDATE nodes SET message_thread_id=? WHERE chat_id=? AND node_name=?`, tid, owner, node)
+	_ = h.db.Exec(`INSERT OR REPLACE INTO forum_topics(forum_chat_id, thread_id, owner, node_name, title) VALUES(?,?,?,?,?)`,
+		h.cfg.ForumChatID, tid, owner, node, title)
 	_ = h.hub.SendCommand(owner, node, "/trigger_set_topic", map[string]any{
 		"chat": fmt.Sprint(h.cfg.ForumChatID), "thread": fmt.Sprint(tid),
 	}, 0)
@@ -792,28 +797,87 @@ func (h *Handlers) forumTopicsRebuild(owner, dest string, threadID int) {
 		h.startForumBind(owner, dest, threadID)
 		return
 	}
-	rows, _ := h.db.Query(`SELECT node_name, node_alias, region, message_thread_id FROM nodes WHERE chat_id=?`, owner)
-	ok, fail := 0, 0
-	for _, r := range rows {
+	forum := h.cfg.ForumChatID
+	_, _ = h.tg.SendMessage(dest, "📌 正在重建论坛话题：保留能对上节点的话题，删除其余旧话题后补建…", false, threadID)
+
+	// Bot API cannot list topics, so only topics recorded in forum_topics (plus current node bindings) are known.
+	_ = h.db.Exec(`INSERT OR IGNORE INTO forum_topics(forum_chat_id, thread_id, owner, node_name, title)
+		SELECT ?, message_thread_id, chat_id, node_name, COALESCE(node_alias, node_name) FROM nodes
+		WHERE chat_id=? AND message_thread_id > 0`, forum, owner)
+
+	type nodeInfo struct{ alias, region string }
+	nodes := map[string]nodeInfo{}
+	bound := map[string]int{}
+	nrows, _ := h.db.Query(`SELECT node_name, node_alias, region, message_thread_id FROM nodes WHERE chat_id=?`, owner)
+	for _, r := range nrows {
 		node := AsString(r["node_name"])
 		alias := AsString(r["node_alias"])
 		if alias == "" {
 			alias = node
 		}
 		region := AsString(r["region"])
-		if intFrom(r["message_thread_id"]) > 0 {
-			// 强制重建：清掉旧绑定再创建
-			_ = h.db.Exec(`UPDATE nodes SET message_thread_id=NULL WHERE chat_id=? AND node_name=?`, owner, node)
+		if region == "" {
+			region = "UNKNOWN"
 		}
-		if _, err := h.ensureNodeForumTopic(owner, node, alias, region); err != nil {
+		nodes[node] = nodeInfo{alias, region}
+		if tid := intFrom(r["message_thread_id"]); tid > 0 {
+			bound[node] = tid
+		}
+	}
+
+	kept, deleted, created, fail := 0, 0, 0, 0
+	keptNode := map[string]bool{}
+	trows, _ := h.db.Query(`SELECT thread_id, node_name FROM forum_topics WHERE forum_chat_id=? AND owner=?`, forum, owner)
+	for _, r := range trows {
+		tid := intFrom(r["thread_id"])
+		node := AsString(r["node_name"])
+		if tid <= 0 {
+			continue
+		}
+		if info, ok := nodes[node]; ok && bound[node] == tid && !keptNode[node] {
+			exists, err := h.tg.EditForumTopic(forum, tid, info.alias+" · "+info.region)
+			if err != nil {
+				// Unknown error (e.g. missing rights): keep binding rather than destroy history.
+				fail++
+				keptNode[node] = true
+				log.Printf("[master] forum rebuild check node=%s thread=%d: %v", node, tid, err)
+				continue
+			}
+			if exists {
+				kept++
+				keptNode[node] = true
+				_ = h.db.Exec(`UPDATE forum_topics SET title=? WHERE forum_chat_id=? AND thread_id=?`, info.alias+" · "+info.region, forum, tid)
+				_ = h.hub.SendCommand(owner, node, "/trigger_set_topic", map[string]any{
+					"chat": fmt.Sprint(forum), "thread": fmt.Sprint(tid),
+				}, 0)
+				time.Sleep(350 * time.Millisecond)
+				continue
+			}
+		}
+		if err := h.tg.DeleteForumTopic(forum, tid); err != nil {
 			fail++
-			log.Printf("[master] forum rebuild node=%s: %v", node, err)
+			log.Printf("[master] forum rebuild delete thread=%d: %v", tid, err)
 		} else {
-			ok++
+			deleted++
+		}
+		_ = h.db.Exec(`DELETE FROM forum_topics WHERE forum_chat_id=? AND thread_id=?`, forum, tid)
+		time.Sleep(350 * time.Millisecond)
+	}
+
+	for node, info := range nodes {
+		if keptNode[node] {
+			continue
+		}
+		_ = h.db.Exec(`UPDATE nodes SET message_thread_id=NULL WHERE chat_id=? AND node_name=?`, owner, node)
+		if _, err := h.ensureNodeForumTopic(owner, node, info.alias, info.region); err != nil {
+			fail++
+			log.Printf("[master] forum rebuild create node=%s: %v", node, err)
+		} else {
+			created++
 		}
 		time.Sleep(350 * time.Millisecond)
 	}
-	_, _ = h.tg.SendMessage(dest, fmt.Sprintf("📌 话题重建完成：成功 %d / 失败 %d", ok, fail), false, threadID)
+	_, _ = h.tg.SendMessage(dest, fmt.Sprintf("📌 话题重建完成：保留 %d / 删除 %d / 新建 %d / 失败 %d", kept, deleted, created, fail), false, threadID)
 }
 
 func (h *Handlers) deleteNode(owner, dest, node string, msgID, threadID int) {
@@ -853,6 +917,19 @@ func (h *Handlers) broadcast(owner, dest, path string, threadID int) {
 		}
 	}
 	_, _ = h.tg.SendMessage(dest, fmt.Sprintf("广播 `%s`：成功 %d / 失败 %d", path, ok, fail), true, threadID)
+}
+
+func (h *Handlers) startUnlockSweep(owner, dest string, threadID int) {
+	where := "私聊"
+	if h.generalDest(owner) != owner {
+		where = "论坛 General 话题"
+	}
+	_, _ = h.tg.SendMessage(dest, "🎯 已向全部节点下发解锁检测：各节点结果发到各自话题，汇总稍后发到"+where+"。", false, threadID)
+	go func() {
+		if !h.runUnlockSweep(owner, "手动触发") {
+			_, _ = h.tg.SendMessage(dest, "上一轮解锁检测仍在进行中，请稍后再试。", false, threadID)
+		}
+	}()
 }
 
 func (h *Handlers) fleetSummary(owner, dest string, threadID int) {

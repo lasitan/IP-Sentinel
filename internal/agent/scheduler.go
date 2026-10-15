@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// runnerInterval matches the original scheduler (20 minutes, first run after one full interval).
+const runnerInterval = 20 * time.Minute
+
 type Scheduler struct {
 	cfg  *Config
 	stop chan struct{}
@@ -27,41 +30,36 @@ func (s *Scheduler) Stop() {
 	s.wg.Wait()
 }
 
+func (s *Scheduler) reload() {
+	if cfg, err := LoadConfig(s.cfg.Path); err == nil {
+		s.cfg = cfg
+	}
+}
+
 func (s *Scheduler) loop() {
 	defer s.wg.Done()
-	// stagger by install hash-ish: use minute offset from node name length
-	offset := time.Duration(len(s.cfg.NodeName)%20) * time.Minute
-	ticker := time.NewTicker(20 * time.Minute)
+	ticker := time.NewTicker(runnerInterval)
 	defer ticker.Stop()
 
-	daily := time.NewTicker(time.Hour)
+	daily := time.NewTicker(30 * time.Second)
 	defer daily.Stop()
-	lastDailyDay := -1
-
-	select {
-	case <-time.After(offset):
-	case <-s.stop:
-		return
-	}
-
-	_ = RunMaintenance(s.cfg)
+	lastReportDay := -1
 
 	for {
 		select {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			cfg, err := LoadConfig(s.cfg.Path)
-			if err == nil {
-				s.cfg = cfg
-			}
-			_ = RunMaintenance(s.cfg)
+			s.reload()
+			s.cfg.Log("Sched", "INFO", "调度触发: 定时巡逻")
+			go func(cfg *Config) { _ = RunMaintenance(cfg, false) }(s.cfg)
 		case <-daily.C:
+			// Daily unlock check is driven by Master (UTC 16:00); agent only keeps the daily report.
 			now := time.Now().UTC()
-			if now.Hour() == 16 && now.Day() != lastDailyDay {
-				lastDailyDay = now.Day()
+			if now.Hour() == 16 && now.Minute() == 0 && now.YearDay() != lastReportDay {
+				lastReportDay = now.YearDay()
+				s.reload()
 				_ = RunReport(s.cfg, false)
-				_ = RunQuality(s.cfg)
 			}
 		}
 	}

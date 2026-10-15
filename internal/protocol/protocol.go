@@ -26,11 +26,11 @@ const (
 
 	AuthSkewSec = 120
 
-	// Keepalive (plan defaults)
-	WSPingInterval = 10 * time.Second
-	WSPingTimeout  = 10 * time.Second
-	AppPingEvery   = 10 * time.Second
-	AppPongWait    = 15 * time.Second
+	// Keepalive: ping every 15s; ~3 missed rounds (45s) of silence means dead.
+	WSPingInterval = 15 * time.Second
+	WSDeadAfter    = 45 * time.Second
+	AppPingEvery   = 15 * time.Second
+	AppPongWait    = 45 * time.Second
 	AuthTimeout    = 15 * time.Second
 	CmdTimeout     = 15 * time.Second
 	MaxMessageSize = 1 << 20

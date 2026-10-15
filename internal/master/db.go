@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS ip_trend_log (
   goog_status TEXT,
   nf_status TEXT,
   gpt_status TEXT
+);
+CREATE TABLE IF NOT EXISTS forum_topics (
+  forum_chat_id TEXT,
+  thread_id INTEGER,
+  owner TEXT,
+  node_name TEXT,
+  title TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(forum_chat_id, thread_id)
 );`)
 	return err
 }
