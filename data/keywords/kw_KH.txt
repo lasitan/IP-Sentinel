@@ -1,4 +1,7 @@
+fraud
 weather
+adam robinson
+afc champions league two
 rb leipzig vs man city
 slavia praha vs arsenal
 villa vie odyssey cruise ship
@@ -40,7 +43,6 @@ patrick stewart
 everton vs newcastle
 al nassr
 phnom penh crown
-afc champions league two
 inter miami vs cincinnati
 liverpool vs chelsea
 efl cup
@@ -96,5 +98,3 @@ katie zacharia
 atlanta united vs inter miami
 real betis vs fc barcelona standings
 strasbourg vs psg
-barcelona
-betis vs barcelona
